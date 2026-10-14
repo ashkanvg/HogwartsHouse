@@ -29,12 +29,18 @@ class HouseClassifier:
         self.characters = checkpoint["characters"]
         self.character_houses = checkpoint["character_houses"]
         self.character_features = checkpoint["character_features"]
-        self.house_lean = checkpoint["house_lean"]  # the network's favourite houses on new faces
+        # calibration from train.py: how sure the network may be, and its favourite houses on new faces
+        self.temperature = checkpoint.get("temperature", 1.0)
+        self.house_lean = checkpoint["house_lean"]
 
     @torch.no_grad()
-    def predict(self, image_path, lookalikes=3):
-        """Returns ({house: probability}, [(character, house, similarity), ...], face_found)."""
-        img = load_image(image_path)
+    def predict(self, image, lookalikes=3):
+        """Read a photo (a file path or an open file).
+
+        Returns {"probs": {house: probability}, "lookalikes": [(character, house, similarity), ...],
+                 "face_found": bool, "face": the cropped face as a PIL image}
+        """
+        img = load_image(image)
         face = crop_face(img)
         face_found = face is not None
         if not face_found:
@@ -42,13 +48,13 @@ class HouseClassifier:
         x = eval_transform(face).unsqueeze(0)
         x = torch.cat([x, x.flip(-1)]).to(self.device)  # look at the face and its mirror image
         logits, features = self.model(x, with_features=True)
-        probs = logits.softmax(1).mean(0).cpu() / self.house_lean  # don't send every new face to one house
+        probs = (logits / self.temperature).softmax(1).mean(0).cpu() / self.house_lean
         probs = probs / probs.sum()
 
         similarity = F.normalize(features.mean(0, keepdim=True), dim=1).cpu() @ self.character_features.T
         top = similarity[0].topk(min(lookalikes, len(self.characters)))
         look = [(self.characters[i], self.character_houses[i], float(s)) for s, i in zip(top.values, top.indices)]
-        return dict(zip(HOUSES, probs.tolist())), look, face_found
+        return {"probs": dict(zip(HOUSES, probs.tolist())), "lookalikes": look, "face_found": face_found, "face": face}
 
 
 def main():
@@ -59,11 +65,12 @@ def main():
 
     classifier = HouseClassifier(args.model)
     for path in args.images:
-        probs, lookalikes, face_found = classifier.predict(path)
+        result = classifier.predict(path)
+        probs = result["probs"]
         best = max(probs, key=probs.get)
-        print(f"\n{path}" + ("" if face_found else "   (no face found - used the whole picture)"))
+        print(f"\n{path}" + ("" if result["face_found"] else "   (no face found - used the whole picture)"))
         print_house_scores(probs)
-        print("  Looks a bit like: " + ", ".join(f"{name} ({house})" for name, house, _ in lookalikes))
+        print("  Looks a bit like: " + ", ".join(f"{name} ({house})" for name, house, _ in result["lookalikes"]))
         print(f"  -> {color(best.upper(), best)}")
 
 

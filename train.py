@@ -9,6 +9,7 @@ How it works (transfer learning):
 Validation holds out whole *characters*, not just some of their pictures, so the validation
 score shows how the hat does on faces it has never seen - which is the real game.
 "Accuracy" is the average over the 4 houses, so random guessing scores about 25%.
+The held-out characters are also used to calibrate how confident the network may be (calibrate()).
 
 Usage:
     python train.py
@@ -85,17 +86,26 @@ def run_epoch(model, loader, criterion, device, optimizer=None):
 
 
 @torch.no_grad()
-def house_lean(model, samples, device):
-    """How much the network leans towards each house on faces it has never seen.
+def calibrate(model, samples, device):
+    """Make the network honest about faces it has never seen (the validation characters).
 
-    Measured on the validation characters and averaged per true house, so a perfect network
-    would give 25% each. predict.py divides it out, so new faces aren't all sent to one house.
+    1. Temperature: the network is far too sure of itself on new faces. Dividing its scores by a
+       temperature softens its probabilities until they match how often it is really right.
+    2. Lean: which houses it still favours on new faces (averaged per true house, so a perfect
+       network would give 25% each).
+    predict.py applies both, so a new face isn't sent to one house with fake confidence.
     """
     model.eval()
     loader = DataLoader(FaceDataset(samples, eval_transform), batch_size=64)
-    probs = torch.cat([model(x.to(device)).softmax(1).cpu() for x, _ in loader])
+    logits = torch.cat([model(x.to(device)).cpu() for x, _ in loader])
     labels = torch.tensor([h for _, h, _ in samples])
-    return torch.stack([probs[labels == h].mean(0) for h in range(len(HOUSES)) if (labels == h).any()]).mean(0)
+    every_house_counts_the_same = 1 / torch.bincount(labels, minlength=len(HOUSES)).clamp(min=1).float()
+    temperatures = torch.linspace(0.5, 10, 96)
+    losses = torch.stack([F.cross_entropy(logits / t, labels, weight=every_house_counts_the_same) for t in temperatures])
+    temperature = temperatures[losses.argmin()].item()
+    probs = (logits / temperature).softmax(1)
+    lean = torch.stack([probs[labels == h].mean(0) for h in range(len(HOUSES)) if (labels == h).any()]).mean(0)
+    return temperature, lean
 
 
 @torch.no_grad()
@@ -172,16 +182,17 @@ def main():
 
     model.load_state_dict(best["state"])
     names, houses, centers = character_fingerprints(model, samples, device)
-    lean = house_lean(model, val, device) if val else torch.full((len(HOUSES),), 1 / len(HOUSES))
+    temperature, lean = calibrate(model, val, device) if val else (1.0, torch.full((len(HOUSES),), 1 / len(HOUSES)))
     MODEL_PATH.parent.mkdir(parents=True, exist_ok=True)
     torch.save({"model": best["state"], "characters": names, "character_houses": houses,
-                "character_features": centers, "house_lean": lean, "val_accuracy": best["val_acc"]}, MODEL_PATH)
+                "character_features": centers, "temperature": temperature, "house_lean": lean,
+                "val_accuracy": best["val_acc"]}, MODEL_PATH)
 
     if best["val_acc"] is not None:
         print(f"\nBest validation accuracy on unseen characters: {best['val_acc']:.0%} (random guessing: 25%)")
         print("  " + "  ".join(f"{h} {a:.0%}" for h, a in zip(HOUSES, best["per_house"].tolist())))
-        print("On unseen faces the network leans towards: " + "  ".join(
-            f"{h} {p:.0%}" for h, p in zip(HOUSES, lean.tolist())) + "  (predict.py corrects for this)")
+        print(f"Calibration (predict.py applies it): temperature {temperature:.1f}, still leans towards "
+              + "  ".join(f"{h} {p:.0%}" for h, p in zip(HOUSES, lean.tolist())))
     print(f"Model saved to {MODEL_PATH}. Try it: python predict.py <photo>  or  python sorting_hat.py")
 
 
