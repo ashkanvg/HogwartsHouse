@@ -1,13 +1,15 @@
 # 🎩 Hogwarts House – a Sorting Hat that looks at your face
 
-A fun terminal game. Show the Sorting Hat a photo of a person; it reads the face with a neural
-network trained on Harry Potter movie characters, asks 3–5 Sorting-Hat questions, and announces
-the house: **Gryffindor, Hufflepuff, Ravenclaw or Slytherin**.
+A fun game. Show the Sorting Hat a photo of a person (or use the webcam). It reads the face with a
+neural network trained on Harry Potter movie characters, asks 3–5 yes/no Sorting-Hat questions
+out loud, and announces the house: **Gryffindor, Hufflepuff, Ravenclaw or Slytherin**.
+
+Play it in a window in your browser (`python app.py`) or in the terminal (`python sorting_hat.py`).
 
 ```
-photo ──► find the face ──► neural network ──► house guess from the face ─┐
-                                                                           ├─► 🎩 "RAVENCLAW!"
-questions.json ──► 3-5 questions (picked to break the tie) ──► answers ───┘
+photo ──► find the face ──► neural network ──► a hint of a house ──────┐
+                                                                        ├─► 🎩 "RAVENCLAW!"
+questions.json ──► 3-5 yes/no questions (a little tournament) ──► answers ──┘
 ```
 
 ## Setup
@@ -26,12 +28,37 @@ pip install -r requirements.txt
 | 2 | `python prepare.py` | Finds the face in each picture and saves a square crop to `data/faces/`. Group photos and pictures with no face are skipped. |
 | 3 | `python train.py` | Trains the neural network and saves it to `models/sorting_hat.pt`. Takes about 1–2 minutes on an Apple Silicon Mac. |
 | 4 | `python predict.py photo.jpg` | Photo only: shows the house scores and which characters the face looks like. |
-| 5 | `python sorting_hat.py` | **The game**: photo + 3–5 questions → your house. |
+| 5 | `python app.py` | **The game, graphical version**: opens in your browser. |
+| 5b | `python sorting_hat.py` | The same game in the terminal. |
 
 Tip: look through `data/faces/` after step 2 and delete wrong crops (a different person, a
 cartoon, ...). Cleaner pictures give a better model.
 
-## The game
+## The graphical game
+
+```bash
+python app.py        # opens http://127.0.0.1:5050 in your browser
+```
+
+- Click **Wake the Sorting Hat**, then use the **webcam**, choose a photo, drop one on the page,
+  or skip the photo. iPhone `.HEIC` photos work too.
+- The hat shows what it sees in your face and which characters you look like, then asks its
+  questions out loud. Answer with the **Yes / No** buttons, or the <kbd>Y</kbd> / <kbd>N</kbd> keys.
+- A shield in your house colours, with sparkles, announces the result.
+
+### The hat's voice
+
+The page uses your browser's built-in voices. It picks a **British male voice** (on a Mac that's
+"Daniel"), then lowers it and slows it down so it sounds like a wise old hat. You can choose
+another voice from the menu at the top right, or mute it with 🔊.
+
+- **Can it sound like a real Harry Potter actor?** No. Copying a real person's voice without
+  their permission isn't okay. So the hat has its own *character-style* voice instead.
+- **Want a nicer voice?** On a Mac, go to System Settings → Accessibility → Spoken Content →
+  System Voice → Manage Voices… → English (United Kingdom). Download a voice such as
+  "Daniel (Enhanced)" or "Jamie (Premium)", then restart the browser and pick it from the menu.
+
+## The terminal game
 
 ```bash
 python sorting_hat.py                       # it asks for a photo (drag one into the terminal, or skip)
@@ -48,32 +75,37 @@ python sorting_hat.py --image me.jpg
 | `--questions` | `questions.json` | Question bank to use |
 | `--seed` | random | Fixes the random choices, for a repeatable game |
 
-How the hat decides:
+The same defaults are used by the graphical game; you can change them at the top of `hat_brain.py`.
 
-1. **Face:** the network gives a probability for each house, and the hat tells you which movie
-   characters you look like.
-2. **Questions:** each answer gives points to one or two houses. The hat picks the next question
-   to separate the two houses it is torn between (e.g. Gryffindor vs Slytherin), and stops early
-   once it is sure.
+## How the hat decides
+
+All the thinking is in `hat_brain.py`, shared by both versions.
+
+1. **Face:** the network gives a probability for each house. It's calibrated, so it's only a
+   hint (see below). The hat also tells you which movie characters you look like.
+2. **Questions:** every yes/no question pits two houses against each other. *Yes* gives 2 points
+   to one house and *no* gives 2 points to the other. The hat runs a little tournament:
+   - **Semi-finals:** the first two questions cover all four houses, starting with the two the
+     face suggests.
+   - **Final:** the leading house then faces its strongest rival.
+   - It stops after 3 questions if it's sure, and asks up to 5 if it isn't.
 3. **Blend:** `final = image_weight × face + (1 − image_weight) × answers`.
 4. **Near tie:** the hat asks which house *you* would prefer. It takes your choice into account,
    just like it did for Harry.
 
+In a simulation of thousands of students who always answer in favour of their true house, the
+hat sorted 100% of them correctly with no photo. Students who answer at random end up spread
+evenly: 25% in each house.
+
 ### Your own questions
 
-`questions.json` has 18 questions inspired by the books and movies (the troll in the dungeon,
-the midnight duel, the Mirror of Erised, the Goblet of Fire, boggarts, the Deathly Hallows...).
-Add, remove or change them freely:
+`questions.json` has 20 yes/no questions inspired by the books and movies: the troll, the
+Triwizard dragon, screaming Mandrakes, the Ravenclaw riddle door, Chocolate Frog cards, and more.
+They're balanced: every house gets exactly 5 "yes" and 5 "no" chances. Add or change them freely:
 
 ```json
-{
-  "id": "goblet",
-  "text": "Would you put your name into the Goblet of Fire?",
-  "options": [
-    {"text": "Instantly. Eternal glory!", "scores": {"Gryffindor": 2, "Slytherin": 1}},
-    {"text": "Only to make my house proud...", "scores": {"Hufflepuff": 3}}
-  ]
-}
+{"id": "dragon", "text": "Would you volunteer to face a dragon in the Triwizard Tournament?",
+ "yes": {"Gryffindor": 2}, "no": {"Ravenclaw": 2}}
 ```
 
 ## How the neural network works
@@ -87,43 +119,43 @@ Add, remove or change them freely:
 - **Honest validation:** `train.py` holds out whole *characters*, not just some of their
   pictures. The validation score therefore measures faces the model has never seen, which is
   the real game. Random guessing scores 25%.
-- **Fair to new faces:** on faces it has never seen, the network leans towards some houses
-  (mostly the ones with extra weight in the loss). `train.py` measures this lean on the
-  held-out characters and saves it, and `predict.py` divides it out. That way a new face isn't
-  automatically sent to Ravenclaw.
-- **Look-alikes:** the average face features of each character are saved with the model, so
-  `predict.py` can tell you who you resemble.
+- **Calibration:** on faces it has never seen, the network was far too sure of itself. It would
+  say "82% Ravenclaw" while being right only about 31% of the time. `train.py` uses the held-out
+  characters for two fixes, and `predict.py` applies both:
+  - It learns a *temperature* (about 5): the scores are divided by it, which softens the
+    probabilities until they match how often the network is really right.
+  - It measures which houses the network still leans towards on new faces, and divides that out.
+- **Look-alikes:** the average face features of each character are saved with the model, so the
+  hat can tell you who you resemble.
 
 Useful options: `python train.py --epochs 20`, `--train-all` (fine-tune the whole network), and
-`--val-split 0` (train on every character once you're happy with the settings).
+`--val-split 0` (train on every character; this also skips calibration).
 
 ## Be honest with your friends 😉
 
 Your face doesn't decide your house. The network learns what the *movie characters* look like:
 hair colour, lighting, costume colours, the actors themselves. With the current data (about
 1,000 face crops of 81 characters), it gets 96% right on characters it trained on, but only
-about 31% on characters it has never seen. Random guessing gets 25%. That's why the questions
-get 60% of the vote by default. It's a game!
+about 31% on characters it has never seen. Random guessing gets 25%. So the face gives a hint and
+breaks ties, and your answers decide. It's a game!
 
 ## Files
 
 ```
+app.py           the graphical game (a small local website)
+web/             its page: index.html, style.css, app.js
+sorting_hat.py   the terminal game
+hat_brain.py     the hat's thinking: questions, scores, tournament, decision
+questions.json   the Sorting Hat's yes/no questions
 common.py        shared code: houses, paths, face cropping, the network
 scrape.py        step 1 – download character pictures
 prepare.py       step 2 – crop faces
-train.py         step 3 – train the network
+train.py         step 3 – train and calibrate the network
 predict.py       step 4 – house from a photo only
-sorting_hat.py   the game
-questions.json   the Sorting Hat's question bank
 data/            downloaded pictures and face crops (not in git)
 models/          trained network and face detector (not in git)
 ```
 
 The pictures are © their owners (Warner Bros. and others). They are only used locally to train
-this toy model. `data/` and `models/` are in `.gitignore` so they are never uploaded; please
-don't publish them.
-
-## Next ideas
-
-- A graphical version: webcam photo, animated hat, house colours
-- More questions, and multiple languages in `questions.json`
+this toy model and to show look-alikes. `data/` and `models/` are in `.gitignore` so they are
+never uploaded; please don't publish them.

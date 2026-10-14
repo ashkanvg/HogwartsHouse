@@ -12,3 +12,6 @@ models/
 
 # macOS
 .DS_Store
+
+# Local Claude Code preview settings
+.claude/

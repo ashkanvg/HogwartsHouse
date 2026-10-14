@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>The Sorting Hat</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Cinzel+Decorative:wght@700;900&family=Cinzel:wght@500;700&family=EB+Garamond:ital,wght@0,400;0,500;1,400&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <div id="sky" aria-hidden="true"></div>
+  <div id="candles" aria-hidden="true"></div>
+
+  <header>
+    <h1>The Sorting Hat</h1>
+    <div class="voice-controls">
+      <button id="mute" class="icon-button" title="Turn the hat's voice on or off">🔊</button>
+      <select id="voice-select" title="Choose the hat's voice" aria-label="The hat's voice"></select>
+    </div>
+  </header>
+
+  <main>
+    <div id="hat-area">
+      <svg id="hat" viewBox="0 0 240 230" role="img" aria-label="The Sorting Hat">
+        <defs>
+          <linearGradient id="felt" x1="0" x2="1">
+            <stop offset="0" stop-color="#80603a"/>
+            <stop offset="0.55" stop-color="#5e4326"/>
+            <stop offset="1" stop-color="#3b2915"/>
+          </linearGradient>
+          <linearGradient id="brim-felt" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0" stop-color="#6f5030"/>
+            <stop offset="1" stop-color="#352411"/>
+          </linearGradient>
+        </defs>
+        <path d="M14 196 Q120 160 226 196 Q120 236 14 196 Z" fill="url(#brim-felt)" stroke="#24180a" stroke-width="2"/>
+        <path d="M52 194 C66 150 80 112 100 82 C110 66 122 50 138 38 C152 28 170 24 184 34 C166 36 154 48 148 64
+                 C142 94 160 150 188 194 Q120 176 52 194 Z" fill="url(#felt)" stroke="#24180a" stroke-width="2"/>
+        <g fill="none" stroke="#2c1e0e" stroke-width="2" stroke-linecap="round" opacity="0.75">
+          <path d="M78 164 Q118 152 160 164"/>
+          <path d="M94 116 Q120 108 146 118"/>
+          <path d="M110 84 Q126 80 142 86"/>
+        </g>
+        <g>
+          <path d="M146 126 l18 -4 l3 16 l-18 4 Z" fill="#8f6e41" stroke="#24180a" stroke-width="1.5"/>
+          <path d="M147 127 l18 -4 M149 140 l18 -4" stroke="#e2d2ad" stroke-width="1" stroke-dasharray="2 2"/>
+        </g>
+        <g class="eyes" fill="none" stroke="#1b1107" stroke-width="3.5" stroke-linecap="round">
+          <path d="M86 138 Q97 129 108 138"/>
+          <path d="M122 138 Q133 129 144 138"/>
+        </g>
+        <ellipse class="mouth" cx="116" cy="166" rx="21" ry="5" fill="#160d05"/>
+      </svg>
+      <p id="speech" aria-live="polite"></p>
+    </div>
+
+    <section class="card" id="step-enter">
+      <div class="buttons"><button id="enter" class="primary">✨ Wake the Sorting Hat</button></div>
+      <p class="hint">Turn your sound on: the hat reads the questions aloud.</p>
+    </section>
+
+    <section class="card" id="step-start" hidden>
+      <p class="lead">Show the hat your face, or skip straight to the questions.</p>
+      <div class="buttons" id="photo-buttons">
+        <button id="use-webcam">📷 Use the webcam</button>
+        <button id="choose-photo">🖼️ Choose a photo</button>
+        <button id="skip-photo" class="quiet">Skip the photo</button>
+      </div>
+      <input type="file" id="photo-input" accept="image/*,.heic,.heif" hidden>
+      <p class="hint" id="photo-hint">You can also drop a photo anywhere on this page.</p>
+      <div id="webcam" hidden>
+        <video id="video" autoplay playsinline muted></video>
+        <div class="buttons">
+          <button id="capture" class="primary">✨ Take the picture</button>
+          <button id="cancel-webcam" class="quiet">Cancel</button>
+        </div>
+      </div>
+    </section>
+
+    <section class="card" id="step-thinking" hidden>
+      <div class="dots"><span></span><span></span><span></span></div>
+    </section>
+
+    <section class="card" id="step-face" hidden>
+      <div class="face-reading">
+        <img id="face-image" alt="The face the hat is looking at">
+        <div id="face-bars" class="bars"></div>
+      </div>
+      <p class="label">You remind the hat of...</p>
+      <div id="lookalikes"></div>
+      <div class="buttons"><button id="to-questions" class="primary">Now look into my mind →</button></div>
+    </section>
+
+    <section class="card" id="step-question" hidden>
+      <p class="label" id="question-number">Question 1</p>
+      <p id="question-text"></p>
+      <div class="buttons big">
+        <button id="answer-yes">Yes</button>
+        <button id="answer-no">No</button>
+      </div>
+      <p class="hint">Press <kbd>Y</kbd> or <kbd>N</kbd> · <a href="#" id="repeat">🔁 Hear it again</a></p>
+    </section>
+
+    <section class="card" id="step-tie" hidden>
+      <p class="lead">Is there a house you would prefer?</p>
+      <div class="buttons" id="tie-buttons"></div>
+    </section>
+
+    <section class="card" id="step-result" hidden>
+      <div id="banner"><div class="shield">
+        <span id="banner-animal"></span>
+        <h2 id="banner-house"></h2>
+        <p id="banner-words"></p>
+      </div></div>
+      <div id="final-bars" class="bars"></div>
+      <div class="buttons"><button id="again" class="primary">Sort another student</button></div>
+    </section>
+  </main>
+
+  <div id="sparkles" aria-hidden="true"></div>
+  <script src="/static/app.js"></script>
+</body>
+</html>

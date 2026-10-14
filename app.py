@@ -1,0 +1,135 @@
+"""The Sorting Hat - graphical version. It runs as a small website on your own computer.
+
+    python app.py                 # opens http://127.0.0.1:5050 in your browser
+    python app.py --port 8000 --no-browser
+
+The page (web/index.html, web/style.css, web/app.js) shows the hat, reads the questions aloud
+with your browser's built-in voices, and talks to this server, which does the thinking:
+    POST /api/face    photo -> house probabilities, look-alike characters and the face crop
+    POST /api/turn    the answers so far -> the hat's next question (or "done")
+    POST /api/result  the final house
+The thinking itself is shared with the terminal game: see hat_brain.py and predict.py.
+"""
+import argparse
+import base64
+import io
+import random
+import threading
+import webbrowser
+
+from flask import Flask, jsonify, request, send_from_directory
+
+import hat_brain as brain
+from common import FACES_DIR, HOUSES, MODEL_PATH, ROOT
+
+app = Flask(__name__, static_folder=str(ROOT / "web"), static_url_path="/static")
+app.config["MAX_CONTENT_LENGTH"] = 25 * 1024 * 1024  # photos up to 25 MB
+
+QUESTIONS = brain.load_questions()
+QUESTIONS_BY_ID = {q["id"]: q for q in QUESTIONS}
+rng = random.Random()
+classifier = None             # the neural network (None if it hasn't been trained yet)
+lock = threading.Lock()       # one face at a time: the face detector isn't thread-safe
+
+
+def data_url(img, size):
+    """A PIL image as a small JPEG that the web page can show directly."""
+    img = img.convert("RGB")
+    img.thumbnail((size, size))
+    buffer = io.BytesIO()
+    img.save(buffer, "JPEG", quality=88)
+    return "data:image/jpeg;base64," + base64.b64encode(buffer.getvalue()).decode()
+
+
+def character_picture(name, house):
+    """A face crop of a movie character from data/faces, for the look-alike cards (if it's there)."""
+    pictures = sorted((FACES_DIR / house / name.replace(" ", "_")).glob("*.jpg"))
+    if not pictures:
+        return None
+    from PIL import Image
+    return data_url(Image.open(pictures[0]), 120)
+
+
+@app.get("/")
+def index():
+    return send_from_directory(app.static_folder, "index.html")
+
+
+@app.get("/api/info")
+def info():
+    return jsonify(houses=HOUSES, can_see=classifier is not None)
+
+
+@app.post("/api/face")
+def read_face():
+    if classifier is None:
+        return jsonify(error="The hat has no eyes yet: run python train.py first."), 400
+    try:
+        photo = base64.b64decode(request.get_json()["image"].split(",", 1)[-1])
+        with lock:
+            result = classifier.predict(io.BytesIO(photo))
+    except Exception:
+        return jsonify(error="That doesn't look like a picture."), 400
+    return jsonify(
+        probs=result["probs"],
+        face_found=result["face_found"],
+        face=data_url(result["face"], 320),
+        lookalikes=[{"name": name, "house": house, "picture": character_picture(name, house)}
+                    for name, house, _ in result["lookalikes"]],
+    )
+
+
+@app.post("/api/turn")
+def turn():
+    """Takes the game so far (face, asked, points, and maybe a new answer) and returns what's next."""
+    data = request.get_json()
+    face, asked, points = data.get("face"), list(data.get("asked", [])), list(data.get("points", [0] * len(HOUSES)))
+    old_probs = brain.combine(face, points)
+    answer = data.get("answer")
+    if answer:
+        question = QUESTIONS_BY_ID[answer["id"]]
+        points = brain.add_answer(points, question, answer["yes"])
+        asked.append(question["id"])
+    probs = brain.combine(face, points)
+    reply = {"asked": asked, "points": points, "probs": dict(zip(HOUSES, probs))}
+    if brain.done_asking(probs, len(asked)):
+        reply["tie"] = brain.near_tie(probs, rng)
+    else:
+        question = brain.next_question(QUESTIONS, asked, probs, rng)
+        reply["question"] = {"id": question["id"], "text": question["text"], "number": len(asked) + 1}
+        if answer:
+            reply["whisper"] = brain.whisper(old_probs, probs, rng)
+    return jsonify(reply)
+
+
+@app.post("/api/result")
+def result():
+    data = request.get_json()
+    probs = brain.combine(data.get("face"), data["points"])
+    house, final = brain.decide(probs, data.get("prefer"))
+    return jsonify(house=house, probs=final)
+
+
+def main():
+    global classifier
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("--port", type=int, default=5050)
+    parser.add_argument("--no-browser", action="store_true", help="don't open the browser automatically")
+    args = parser.parse_args()
+
+    if MODEL_PATH.exists():
+        print("Waking up the Sorting Hat (loading the neural network)...")
+        from predict import HouseClassifier
+        classifier = HouseClassifier()
+    else:
+        print("No trained model yet (run python train.py) - the hat will only ask questions.")
+
+    url = f"http://127.0.0.1:{args.port}"
+    print(f"\n  The Sorting Hat is ready: {url}\n  (press Ctrl+C to stop)\n")
+    if not args.no_browser:
+        threading.Timer(1.0, webbrowser.open, [url]).start()
+    app.run(host="127.0.0.1", port=args.port)
+
+
+if __name__ == "__main__":
+    main()
