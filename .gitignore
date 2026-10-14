@@ -1,0 +1,14 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Downloaded pictures (copyrighted movie stills - keep them local, don't publish them)
+data/
+
+# Trained model weights (large binary files)
+models/
+
+# macOS
+.DS_Store

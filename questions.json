@@ -1,0 +1,185 @@
+{
+  "_about": "The Sorting Hat's question bank. Every answer gives points to one or more houses. Edit freely: add questions, change the points, or translate them. House names must be exactly Gryffindor, Hufflepuff, Ravenclaw or Slytherin, and every id must be different.",
+  "questions": [
+    {
+      "id": "troll",
+      "text": "It's Halloween, and a troll is loose in the castle. You realise a classmate is alone in the girls' bathroom and has no idea. What do you do?",
+      "options": [
+        {"text": "Run to find them right now. There's no time to fetch a teacher.", "scores": {"Gryffindor": 3}},
+        {"text": "Grab a friend and go together. Nobody should face a troll alone.", "scores": {"Hufflepuff": 2, "Gryffindor": 1}},
+        {"text": "Remember what you've read about trolls and set a clever trap.", "scores": {"Ravenclaw": 3}},
+        {"text": "Alert a teacher, and make sure everyone knows it was you who raised the alarm.", "scores": {"Slytherin": 3}}
+      ]
+    },
+    {
+      "id": "mirror",
+      "text": "You find the Mirror of Erised, which shows your heart's deepest desire. What do you see?",
+      "options": [
+        {"text": "Me, back from a great adventure, with my friends cheering.", "scores": {"Gryffindor": 3}},
+        {"text": "Everyone I love, together, safe and happy.", "scores": {"Hufflepuff": 3}},
+        {"text": "Me, holding the answer to a question nobody has ever solved.", "scores": {"Ravenclaw": 3}},
+        {"text": "Me, powerful and admired, my name known everywhere.", "scores": {"Slytherin": 3}}
+      ]
+    },
+    {
+      "id": "duel",
+      "text": "A rival challenges you to a secret wizard's duel at midnight in the trophy room. You...",
+      "options": [
+        {"text": "Show up, wand ready. I never back down from a challenge.", "scores": {"Gryffindor": 3}},
+        {"text": "Show up, but bring a friend and insist it's a fair fight.", "scores": {"Hufflepuff": 3}},
+        {"text": "Smell a trap and stay in bed.", "scores": {"Ravenclaw": 3}},
+        {"text": "Agree... then tip off the caretaker, so it's my rival who gets caught.", "scores": {"Slytherin": 3}}
+      ]
+    },
+    {
+      "id": "goblet",
+      "text": "Would you put your name into the Goblet of Fire?",
+      "options": [
+        {"text": "Instantly. Eternal glory!", "scores": {"Gryffindor": 2, "Slytherin": 1}},
+        {"text": "Only to make my house proud, and I'd help the other champions too.", "scores": {"Hufflepuff": 3}},
+        {"text": "Not before studying every task from every past tournament.", "scores": {"Ravenclaw": 3}},
+        {"text": "Yes. The prize money and the fame would open a lot of doors.", "scores": {"Slytherin": 3}}
+      ]
+    },
+    {
+      "id": "restricted",
+      "text": "You find the Restricted Section of the library unlocked at night. You...",
+      "options": [
+        {"text": "Sneak in. Some rules are worth breaking for an adventure.", "scores": {"Gryffindor": 3}},
+        {"text": "Lock it and tell the librarian, so nobody gets into trouble.", "scores": {"Hufflepuff": 3}},
+        {"text": "Go in, but only for that one book I've been dying to read.", "scores": {"Ravenclaw": 3}},
+        {"text": "Look for anything that could give me an edge, and make sure nobody sees me.", "scores": {"Slytherin": 3}}
+      ]
+    },
+    {
+      "id": "quidditch",
+      "text": "Your house is losing the Quidditch final and you're on the team. You...",
+      "options": [
+        {"text": "Go for a wild, risky dive at the Snitch.", "scores": {"Gryffindor": 3}},
+        {"text": "Keep cheering on my teammates and play fair to the very end.", "scores": {"Hufflepuff": 3}},
+        {"text": "Spot the pattern in the other team's moves and call a smarter play.", "scores": {"Ravenclaw": 2, "Slytherin": 1}},
+        {"text": "Rattle their Seeker. It's not technically against the rules...", "scores": {"Slytherin": 3}}
+      ]
+    },
+    {
+      "id": "hallows",
+      "text": "Which of the Deathly Hallows would you choose?",
+      "options": [
+        {"text": "The Invisibility Cloak, for secret adventures.", "scores": {"Gryffindor": 3}},
+        {"text": "The Resurrection Stone, to see the people I've lost.", "scores": {"Hufflepuff": 3}},
+        {"text": "None of them. I'd rather find out how they were made.", "scores": {"Ravenclaw": 3}},
+        {"text": "The Elder Wand, the most powerful wand ever made.", "scores": {"Slytherin": 3}}
+      ]
+    },
+    {
+      "id": "spell",
+      "text": "Which spell would you want to master first?",
+      "options": [
+        {"text": "Expelliarmus, so I can protect anyone, anywhere.", "scores": {"Gryffindor": 3}},
+        {"text": "A healing charm, so I can patch up my friends.", "scores": {"Hufflepuff": 3}},
+        {"text": "A brand-new spell that I invent myself.", "scores": {"Ravenclaw": 3}},
+        {"text": "Legilimency, so I always know what others are thinking.", "scores": {"Slytherin": 3}}
+      ]
+    },
+    {
+      "id": "boggart",
+      "text": "A boggart turns into the thing you fear most. What does yours become?",
+      "options": [
+        {"text": "Me, frozen and useless while my friends are in danger.", "scores": {"Gryffindor": 3}},
+        {"text": "Me, all alone, because my friends have turned their backs on me.", "scores": {"Hufflepuff": 3}},
+        {"text": "A pile of exam papers, all marked 'FAIL'.", "scores": {"Ravenclaw": 3}},
+        {"text": "Me, forgotten: a nobody who never achieved anything.", "scores": {"Slytherin": 3}}
+      ]
+    },
+    {
+      "id": "room",
+      "text": "The Room of Requirement opens up just for you. What's inside?",
+      "options": [
+        {"text": "A duelling hall, to train for real danger.", "scores": {"Gryffindor": 3}},
+        {"text": "A cosy common room where everyone is welcome.", "scores": {"Hufflepuff": 3}},
+        {"text": "An endless library with the comfiest armchair in the castle.", "scores": {"Ravenclaw": 3}},
+        {"text": "A hidden vault full of forgotten secrets and powerful objects.", "scores": {"Slytherin": 3}}
+      ]
+    },
+    {
+      "id": "hogsmeade",
+      "text": "You have a free afternoon in Hogsmeade. Where do you go?",
+      "options": [
+        {"text": "Up to the Shrieking Shack. They say it's haunted!", "scores": {"Gryffindor": 3}},
+        {"text": "The Three Broomsticks, with as many friends as fit around the table.", "scores": {"Hufflepuff": 3}},
+        {"text": "The bookshop, then a quiet corner to read what I bought.", "scores": {"Ravenclaw": 3}},
+        {"text": "Wherever the important people are. It's all about who you know.", "scores": {"Slytherin": 3}}
+      ]
+    },
+    {
+      "id": "riddle",
+      "text": "Your group reaches a door sealed by a tricky magical riddle. What's your role?",
+      "options": [
+        {"text": "Leading the way into whatever is behind it.", "scores": {"Gryffindor": 3}},
+        {"text": "Keeping everyone calm and making sure nobody gets left behind.", "scores": {"Hufflepuff": 3}},
+        {"text": "Solving the riddle while everyone else panics.", "scores": {"Ravenclaw": 3}},
+        {"text": "Making the plan, and making sure it works out best for me.", "scores": {"Slytherin": 2, "Ravenclaw": 1}}
+      ]
+    },
+    {
+      "id": "friend",
+      "text": "A friend broke a school rule, and a teacher asks you who did it. You...",
+      "options": [
+        {"text": "Take the blame myself to protect them.", "scores": {"Gryffindor": 2, "Hufflepuff": 1}},
+        {"text": "Say nothing. I'd never betray a friend.", "scores": {"Hufflepuff": 3}},
+        {"text": "Explain, very logically, why it wasn't really against the rules.", "scores": {"Ravenclaw": 3}},
+        {"text": "Keep quiet, and remind my friend later that they owe me one.", "scores": {"Slytherin": 3}}
+      ]
+    },
+    {
+      "id": "rules",
+      "text": "What do you think about school rules?",
+      "options": [
+        {"text": "Made to be broken when something important is at stake.", "scores": {"Gryffindor": 3}},
+        {"text": "They keep everyone safe and treated fairly, so I follow them.", "scores": {"Hufflepuff": 3}},
+        {"text": "Fine, as long as someone can explain why they exist.", "scores": {"Ravenclaw": 2, "Hufflepuff": 1}},
+        {"text": "Useful, mostly for the people who know how to bend them.", "scores": {"Slytherin": 3}}
+      ]
+    },
+    {
+      "id": "career",
+      "text": "What would you like to do after Hogwarts?",
+      "options": [
+        {"text": "Become an Auror and hunt down dark wizards.", "scores": {"Gryffindor": 3}},
+        {"text": "Be a Healer at St Mungo's, or a teacher.", "scores": {"Hufflepuff": 3}},
+        {"text": "Study the secrets of magic in the Department of Mysteries.", "scores": {"Ravenclaw": 3}},
+        {"text": "Climb all the way up to Minister for Magic.", "scores": {"Slytherin": 2, "Gryffindor": 1}}
+      ]
+    },
+    {
+      "id": "vault",
+      "text": "What would you keep in your vault at Gringotts?",
+      "options": [
+        {"text": "A trophy from the bravest thing I've ever done.", "scores": {"Gryffindor": 3}},
+        {"text": "Letters and photos from the people I love.", "scores": {"Hufflepuff": 3}},
+        {"text": "My notebooks, full of ideas and inventions.", "scores": {"Ravenclaw": 3}},
+        {"text": "Gold (lots of it) and a few valuable secrets.", "scores": {"Slytherin": 3}}
+      ]
+    },
+    {
+      "id": "creature",
+      "text": "You may look after one magical creature for a year. Which one?",
+      "options": [
+        {"text": "A hippogriff: proud, fierce and amazing to fly.", "scores": {"Gryffindor": 3}},
+        {"text": "A family of Bowtruckles: small, loyal and devoted to their tree.", "scores": {"Hufflepuff": 3}},
+        {"text": "A Demiguise: it can turn invisible and see the future.", "scores": {"Ravenclaw": 3}},
+        {"text": "A snake: clever, elegant and badly misunderstood.", "scores": {"Slytherin": 3}}
+      ]
+    },
+    {
+      "id": "potion",
+      "text": "Professor Slughorn will give a bottle of Felix Felicis to whoever brews the best potion. How do you win it?",
+      "options": [
+        {"text": "Trust my instincts and go for it boldly.", "scores": {"Gryffindor": 3}},
+        {"text": "Follow the instructions patiently, step by careful step.", "scores": {"Hufflepuff": 2, "Ravenclaw": 1}},
+        {"text": "Find a cleverer method than the one in the textbook.", "scores": {"Ravenclaw": 3}},
+        {"text": "Charm the professor. He loves collecting talented students.", "scores": {"Slytherin": 3}}
+      ]
+    }
+  ]
+}
