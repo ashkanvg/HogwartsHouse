@@ -3,11 +3,12 @@
     python app.py                 # opens http://127.0.0.1:5050 in your browser
     python app.py --port 8000 --no-browser
 
-The page (web/index.html, web/style.css, web/app.js) shows the hat, reads the questions aloud
-with your browser's built-in voices, and talks to this server, which does the thinking:
+The page (web/index.html, web/style.css, web/app.js) shows the hat and talks to this server,
+which does the thinking and the talking:
     POST /api/face    photo -> house probabilities, look-alike characters and the face crop
     POST /api/turn    the answers so far -> the hat's next question (or "done")
     POST /api/result  the final house
+    GET  /api/voice   a line of text -> the hat saying it (a WAV file, see voice.py)
 The thinking itself is shared with the terminal game: see hat_brain.py and predict.py.
 """
 import argparse
@@ -17,9 +18,10 @@ import random
 import threading
 import webbrowser
 
-from flask import Flask, jsonify, request, send_from_directory
+from flask import Flask, Response, jsonify, request, send_from_directory
 
 import hat_brain as brain
+import voice
 from common import FACES_DIR, HOUSES, MODEL_PATH, ROOT
 
 app = Flask(__name__, static_folder=str(ROOT / "web"), static_url_path="/static")
@@ -29,7 +31,21 @@ QUESTIONS = brain.load_questions()
 QUESTIONS_BY_ID = {q["id"]: q for q in QUESTIONS}
 rng = random.Random()
 classifier = None             # the neural network (None if it hasn't been trained yet)
+hat_voice = None              # the neural voice (None if it couldn't load: the page uses the browser's voices)
 lock = threading.Lock()       # one face at a time: the face detector isn't thread-safe
+
+
+def warm_up(lines, voice_id=voice.DEFAULT_VOICE):
+    """Say these lines once in the background, so they're ready the moment the hat needs them."""
+    def run():
+        for line in lines:
+            try:
+                hat_voice.wav(line, voice_id)
+            except Exception:
+                app.logger.exception("Could not prepare a line of speech")
+                return
+    if hat_voice is not None:
+        threading.Thread(target=run, daemon=True).start()
 
 
 def data_url(img, size):
@@ -57,7 +73,29 @@ def index():
 
 @app.get("/api/info")
 def info():
-    return jsonify(houses=HOUSES, can_see=classifier is not None)
+    voices = [{"id": key, "name": name} for key, name in voice.VOICES.items()] if hat_voice else []
+    return jsonify(houses=HOUSES, can_see=classifier is not None, voices=voices, default_voice=voice.DEFAULT_VOICE)
+
+
+@app.get("/api/voice")
+def speak_line():
+    text, voice_id = request.args.get("text", "").strip(), request.args.get("voice", voice.DEFAULT_VOICE)
+    if hat_voice is None:
+        return jsonify(error="The hat's voice isn't available."), 404
+    if not text or len(text) > 400 or voice_id not in voice.VOICES:
+        return jsonify(error="The hat can't say that."), 400
+    return Response(hat_voice.wav(text, voice_id), mimetype="audio/wav", headers={"Cache-Control": "max-age=86400"})
+
+
+@app.post("/api/warm")
+def warm():
+    """The page sends its own lines once, so they're ready before the hat needs them."""
+    data = request.get_json(silent=True) or {}
+    voice_id = data.get("voice", voice.DEFAULT_VOICE)
+    lines = [line for line in data.get("lines", []) if isinstance(line, str) and 0 < len(line) <= 400][:50]
+    if voice_id in voice.VOICES:
+        warm_up(lines, voice_id)
+    return jsonify(ok=True)
 
 
 @app.post("/api/face")
@@ -116,7 +154,7 @@ def result():
 
 
 def main():
-    global classifier
+    global classifier, hat_voice
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--port", type=int, default=5050)
     parser.add_argument("--no-browser", action="store_true", help="don't open the browser automatically")
@@ -128,6 +166,12 @@ def main():
         classifier = HouseClassifier()
     else:
         print("No trained model yet (run python train.py) - the hat will only ask questions.")
+
+    try:
+        hat_voice = voice.HatVoice()
+        warm_up([q["text"] for q in QUESTIONS] + list(brain.WHISPERS.values()) + brain.MURMURS)
+    except Exception as error:  # e.g. kokoro-onnx not installed, or no internet for the first download
+        print(f"The hat's natural voice isn't available ({error}) - using the browser's voices instead.")
 
     url = f"http://127.0.0.1:{args.port}"
     print(f"\n  The Sorting Hat is ready: {url}\n  (press Ctrl+C to stop)\n")

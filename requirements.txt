@@ -9,4 +9,5 @@ pillow-heif>=0.16,<2
 numpy>=1.26,<3
 requests>=2.31,<3
 flask>=3.0,<4
+kokoro-onnx>=0.6,<1  # the hat's natural voice (downloads a 350 MB model the first time)
 pytest>=8,<10  # only needed to run the tests

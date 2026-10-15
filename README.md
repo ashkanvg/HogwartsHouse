@@ -54,15 +54,25 @@ python app.py        # opens http://127.0.0.1:5050 in your browser
 
 ### The hat's voice
 
-The page uses your browser's built-in voices. It picks a **British male voice** (on a Mac that's
-"Daniel"), then lowers it and slows it down so it sounds like a wise old hat. You can choose
-another voice from the menu at the top right, or mute it with 🔊.
+The hat speaks with a **natural-sounding neural voice** that runs on your own computer: no
+internet or account needed once it's downloaded. It uses
+[Kokoro](https://huggingface.co/hexgrad/Kokoro-82M), an open text-to-speech model
+(Apache-2.0 licence), through [kokoro-onnx](https://github.com/thewh1teagle/kokoro-onnx).
 
-- **Can it sound like a real Harry Potter actor?** No. Copying a real person's voice without
-  their permission isn't okay. So the hat has its own *character-style* voice instead.
-- **Want a nicer voice?** On a Mac, go to System Settings → Accessibility → Spoken Content →
-  System Voice → Manage Voices… → English (United Kingdom). Download a voice such as
-  "Daniel (Enhanced)" or "Jamie (Premium)", then restart the browser and pick it from the menu.
+- **Voices:** four British men: George (the default), Fable, Lewis and Daniel. George and Fable
+  are Kokoro's best-rated ones. Each is played 8% slower, which also makes it a little deeper,
+  like a wise old hat.
+- **First start:** `python app.py` downloads the voice model once (about 350 MB, checked against
+  its fingerprint) into `models/voice/`.
+- **Speed:** every line the hat says is saved in `models/voice/cache/`. All the questions are
+  prepared in the background when the app starts, so they play without waiting. A brand-new line,
+  like your look-alikes' names, takes about 2 seconds the first time.
+- **Backup:** if the natural voice isn't available, the page falls back to your browser's
+  built-in voices, also listed in the menu at the top right. Mute the hat with 🔊.
+- **Try a voice from the terminal:** `python voice.py "Hmm... difficult." --voice bm_fable`
+  writes `hat_voice.wav`.
+- **Can it sound like a real Harry Potter actor?** No. Copying a real person's voice without their
+  permission isn't okay, so the hat has its own *character-style* voice instead.
 
 ## The terminal game
 
@@ -168,12 +178,15 @@ The tests take a few seconds and don't need a trained model. They check three th
 - Simulated students are sorted correctly and fairly: honest ones, random ones, ones who like
   nicer answers, and ones whose face points to the wrong house.
 - The web server handles both good and bad requests.
+- The hat's voice makes slower, deeper, evenly loud lines, each only once. This uses a fake
+  speech engine, so the 350 MB model isn't needed.
 
 ## Files
 
 ```
 app.py           the graphical game (a small local website)
 web/             its page: index.html, style.css, app.js
+voice.py         the hat's natural voice (Kokoro text-to-speech)
 sorting_hat.py   the terminal game
 hat_brain.py     the hat's thinking: questions, scores, tournament, decision
 questions.json   the Sorting Hat's yes/no questions
@@ -185,7 +198,7 @@ predict.py       step 4 – house from a photo only
 tests/           the tests (run with: pytest)
 requirements.txt / requirements-lock.txt   allowed versions / exact tested versions
 data/            downloaded pictures and face crops (not in git)
-models/          trained network and face detector (not in git)
+models/          trained network, face detector and voice model (not in git)
 ```
 
 The pictures are © their owners (Warner Bros. and others). They are only used locally to train

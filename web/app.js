@@ -1,6 +1,6 @@
 // The Sorting Hat - what happens on the web page.
-// The thinking is done by the server (app.py + hat_brain.py). This file shows things,
-// reads them aloud with the browser's built-in voices, and sends your photo and answers.
+// The thinking is done by the server (app.py + hat_brain.py). This file shows things, plays the
+// hat's voice (made by the server, see voice.py), and sends your photo and answers.
 
 const HOUSES = ["Gryffindor", "Hufflepuff", "Ravenclaw", "Slytherin"];
 const HOUSE_INFO = {
@@ -9,13 +9,31 @@ const HOUSE_INFO = {
   Ravenclaw: { animal: "🦅", words: "Wise, witty and curious" },
   Slytherin: { animal: "🐍", words: "Ambitious, cunning and proud" },
 };
+const LINES = { // what the hat says (the server prepares these in its voice ahead of time)
+  welcome: "Ah... a new student! Step forward, and let me take a look at you.",
+  lookAtFace: "Hmm... let me see that face...",
+  cantRead: "Hmm, I can't read that picture. Try another one, or skip it.",
+  faceNotEverything: "But a face doesn't tell me everything. Let me look inside your mind...",
+  noPicture: "No picture? Very well. Let me look inside your mind instead...",
+  didntCatch: "Hmm, I didn't catch that... Is app.py still running? Answer again when it is.",
+  lostThought: "Hmm, I lost my train of thought... Is app.py still running? Press Try again.",
+  backAgain: "Ah, there we are...",
+  yourChoice: "Are you sure? Well... the hat does take your choice into account.",
+  decided: "Right then... I know just where to put you...",
+  noWebcam: "I can't see through your webcam... Choose a photo instead.",
+  holdStill: "Look straight at me... and hold still!",
+  trying: "Hmm... is this how I sound?",
+};
 const $ = (selector) => document.querySelector(selector);
 
 // ------------------------------------------------------------------ the hat's voice
-// A British male voice, a bit deeper and slower than normal, makes a good old hat.
+// Best: the natural voice made by the server (voice.py). Backup: the browser's built-in voices,
+// with a British male voice made a bit deeper and slower.
 const PREFERRED_VOICES = ["Daniel", "Google UK English Male", "Arthur", "Oliver", "Grandpa", "Rocko", "Reed", "Eddy"];
-const voice = { on: true, chosen: null, pitch: 0.7, rate: 0.88 };
+const voice = { on: true, natural: null, browser: null, pitch: 0.7, rate: 0.88 };
 const canSpeak = "speechSynthesis" in window;
+let naturalVoices = []; // [{id, name}] from the server, empty if it can't speak
+let defaultNatural = null;
 
 function englishVoices() {
   return canSpeak ? speechSynthesis.getVoices().filter((v) => v.lang.toLowerCase().startsWith("en")) : [];
@@ -31,25 +49,86 @@ function pickDefaultVoice(voices) {
 }
 
 function setUpVoices() {
-  const voices = englishVoices();
-  if (!voices.length) return;
-  voice.chosen = voices.find((v) => v.name === load("hatVoice")) || pickDefaultVoice(voices);
   const select = $("#voice-select");
   select.innerHTML = "";
-  for (const v of voices) select.add(new Option(`${v.name} (${v.lang})`, v.name, false, v === voice.chosen));
+  for (const v of naturalVoices) select.add(new Option(`🎩 ${v.name} (natural)`, `natural:${v.id}`));
+  for (const v of englishVoices()) select.add(new Option(`${v.name} (${v.lang})`, `browser:${v.name}`));
+  const saved = load("hatVoice");
+  const fallback = pickDefaultVoice(englishVoices());
+  const values = [...select.options].map((option) => option.value);
+  select.value = values.includes(saved) ? saved
+    : naturalVoices.length ? `natural:${defaultNatural}` : fallback ? `browser:${fallback.name}` : "";
+  useVoice(select.value);
+  $(".voice-controls").hidden = !values.length;
 }
 
+function useVoice(value) {
+  const name = value.slice(value.indexOf(":") + 1);
+  voice.natural = value.startsWith("natural:") ? name : null;
+  voice.browser = englishVoices().find((v) => value === `browser:${v.name}`) || pickDefaultVoice(englishVoices());
+}
+
+function warmUp() {
+  // ask the server to prepare the hat's lines in this voice, so they play without waiting
+  if (!voice.natural) return;
+  const lines = [...Object.values(LINES), ...HOUSES.map((house) => `${house.toUpperCase()}!`)];
+  fetch("/api/warm", {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ voice: voice.natural, lines }),
+  }).catch(() => {});
+}
+
+let stopCurrent = null; // stops the natural voice if it is talking
 let utterance = null; // keep a reference, or some browsers forget to tell us when it ends
 
-function speak(text, { pitch = voice.pitch, rate = voice.rate } = {}) {
+function stopTalking() {
+  if (stopCurrent) stopCurrent();
+  if (canSpeak) speechSynthesis.cancel();
+}
+
+function speak(text, options = {}) {
+  stopTalking();
+  if (!voice.on) {
+    return new Promise((resolve) => setTimeout(resolve, Math.min(3500, 700 + text.length * 25))); // time to read it
+  }
+  return voice.natural ? speakNaturally(text, options) : speakWithBrowser(text, options);
+}
+
+function speakNaturally(text, options) {
   return new Promise((resolve) => {
-    if (!voice.on || !canSpeak) {
-      setTimeout(resolve, Math.min(3500, 700 + text.length * 25)); // time to read it instead
+    const audio = new Audio(`/api/voice?voice=${encodeURIComponent(voice.natural)}&text=${encodeURIComponent(text)}`);
+    let done = false;
+    const finish = () => {
+      if (done) return;
+      done = true;
+      clearTimeout(safetyNet);
+      if (stopCurrent === stop) stopCurrent = null;
+      $("#hat").classList.remove("talking");
+      resolve();
+    };
+    const stop = () => { audio.pause(); finish(); };
+    const safetyNet = setTimeout(stop, 30000);
+    stopCurrent = stop;
+    audio.onplaying = () => $("#hat").classList.add("talking");
+    audio.onended = finish;
+    audio.onerror = () => { // the server can't speak right now: use the browser's voice for this line
+      if (done) return;
+      done = true;
+      clearTimeout(safetyNet);
+      if (stopCurrent === stop) stopCurrent = null;
+      speakWithBrowser(text, options).then(resolve);
+    };
+    audio.play().catch(() => audio.onerror());
+  });
+}
+
+function speakWithBrowser(text, { pitch = voice.pitch, rate = voice.rate } = {}) {
+  return new Promise((resolve) => {
+    if (!canSpeak) {
+      setTimeout(resolve, Math.min(3500, 700 + text.length * 25));
       return;
     }
-    speechSynthesis.cancel();
     utterance = new SpeechSynthesisUtterance(text);
-    if (voice.chosen) utterance.voice = voice.chosen;
+    if (voice.browser) utterance.voice = voice.browser;
     utterance.pitch = pitch;
     utterance.rate = rate;
     const safetyNet = setTimeout(finish, 4000 + text.length * 120); // in case "end" never arrives
@@ -102,7 +181,7 @@ let retry = null; // what the "Try again" button does after a failed request
 
 function newStep(name) {
   flow += 1;
-  if (canSpeak) speechSynthesis.cancel();
+  stopTalking();
   for (const step of STEPS) $(`#step-${step}`).hidden = step !== name;
   $("#hat").classList.toggle("thinking", name === "thinking");
   $("#retry").hidden = true;
@@ -118,7 +197,7 @@ async function offerRetry(me, action) {
   if (me !== flow) return;
   retry = action;
   $("#retry").hidden = false;
-  await say("Hmm, I lost my train of thought... Is app.py still running? Press Try again.");
+  await say(LINES.lostThought);
 }
 
 async function post(url, body) {
@@ -138,20 +217,20 @@ async function welcome() {
   document.body.className = "";
   $("#sparkles").innerHTML = "";
   newStep("start");
-  await say("Ah... a new student! Step forward, and let me take a look at you.");
+  await say(LINES.welcome);
 }
 
 async function readPhoto(dataUrl) {
   stopWebcam();
   const me = newStep("thinking");
-  const talking = say("Hmm... let me see that face...");
+  const talking = say(LINES.lookAtFace);
   let reading;
   try {
     reading = await post("/api/face", { image: dataUrl });
   } catch (error) {
     if (me !== flow) return;
     newStep("start");
-    await say("Hmm, I can't read that picture. Try another one, or skip it.");
+    await say(LINES.cantRead);
     return;
   }
   await talking; // let the hat finish its sentence
@@ -169,16 +248,14 @@ async function readPhoto(dataUrl) {
 
 async function startQuestions() {
   const me = newStep("thinking");
-  await say(game.face
-    ? "But a face doesn't tell me everything. Let me look inside your mind..."
-    : "No picture? Very well. Let me look inside your mind instead...");
+  await say(game.face ? LINES.faceNotEverything : LINES.noPicture);
   if (me === flow) await nextTurn(null);
 }
 
 async function nextTurn(answer) {
   flow += 1; // a new step, but keep the current card on screen while the hat thinks
   const me = flow;
-  if (canSpeak) speechSynthesis.cancel();
+  stopTalking();
   busy = true;
   setAnswerButtons(false);
   let reply;
@@ -189,7 +266,7 @@ async function nextTurn(answer) {
     if (me !== flow) return;
     if (answer) { // still on the same question: the student can simply answer again
       setAnswerButtons(true);
-      await say("Hmm, I didn't catch that... Is app.py still running? Answer again when it is.");
+      await say(LINES.didntCatch);
     } else {
       await offerRetry(me, () => nextTurn(null));
     }
@@ -248,7 +325,7 @@ async function askPreference(houses) {
 
 async function reveal(prefer) {
   const me = newStep("thinking");
-  if (prefer) await say("Are you sure? Well... the hat does take your choice into account.");
+  if (prefer) await say(LINES.yourChoice);
   if (me !== flow) return;
   let result;
   try {
@@ -258,7 +335,7 @@ async function reveal(prefer) {
     return;
   }
   if (me !== flow) return;
-  await say("Right then... I know just where to put you...");
+  await say(LINES.decided);
   if (me !== flow) return;
   const house = result.house;
   document.body.className = `house-${house}`;
@@ -365,13 +442,13 @@ async function startWebcam() {
   try {
     stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "user" } });
   } catch (error) {
-    await say("I can't see through your webcam... Choose a photo instead.");
+    await say(LINES.noWebcam);
     return;
   }
   $("#video").srcObject = stream;
   $("#webcam").hidden = false;
   $("#photo-buttons").hidden = true;
-  await say("Look straight at me... and hold still!");
+  await say(LINES.holdStill);
 }
 
 function stopWebcam() {
@@ -413,9 +490,6 @@ async function init() {
   decorate();
   voice.on = load("hatVoiceOn") !== "0";
   $("#mute").textContent = voice.on ? "🔊" : "🔇";
-  setUpVoices();
-  if (canSpeak) speechSynthesis.onvoiceschanged = setUpVoices;
-  if (!canSpeak) $(".voice-controls").hidden = true;
 
   $("#enter").onclick = welcome;
   $("#use-webcam").onclick = startWebcam;
@@ -433,18 +507,19 @@ async function init() {
     voice.on = !voice.on;
     store("hatVoiceOn", voice.on ? "1" : "0");
     $("#mute").textContent = voice.on ? "🔊" : "🔇";
-    if (!voice.on && canSpeak) speechSynthesis.cancel();
+    if (!voice.on) stopTalking();
   };
   $("#voice-select").onchange = (event) => {
-    voice.chosen = englishVoices().find((v) => v.name === event.target.value) || voice.chosen;
-    store("hatVoice", voice.chosen ? voice.chosen.name : "");
-    say("Hmm... is this how I sound?");
+    store("hatVoice", event.target.value);
+    useVoice(event.target.value);
+    say(LINES.trying);
+    warmUp();
   };
   $("#retry").onclick = () => {
     const action = retry;
     retry = null;
     $("#retry").hidden = true;
-    showSpeech("Ah, there we are...");
+    showSpeech(LINES.backAgain);
     if (action) action();
   };
   document.addEventListener("keydown", (event) => {
@@ -463,6 +538,8 @@ async function init() {
 
   try {
     const info = await (await fetch("/api/info")).json();
+    naturalVoices = info.voices || [];
+    defaultNatural = info.default_voice;
     if (!info.can_see) {
       $("#use-webcam").hidden = $("#choose-photo").hidden = true;
       $("#photo-hint").textContent = "The hat has no eyes yet (run python train.py), so it will only ask questions.";
@@ -470,6 +547,9 @@ async function init() {
   } catch (error) {
     $("#photo-hint").textContent = "Can't reach the hat's server. Start it with: python app.py";
   }
+  setUpVoices();
+  if (canSpeak) speechSynthesis.onvoiceschanged = setUpVoices; // browsers load their voices late
+  warmUp();
   newStep("enter");
   showSpeech("Psst... over here! Wake me up and I'll find your house.");
 }

@@ -47,7 +47,12 @@ _face_detector = None
 
 
 def sha256(path):
-    return hashlib.sha256(Path(path).read_bytes()).hexdigest()
+    """A file's fingerprint, read in 1 MB pieces so big model files don't fill the memory."""
+    digest = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 def face_detector_file():
