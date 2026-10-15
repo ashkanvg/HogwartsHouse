@@ -1,4 +1,4 @@
-"""Shared pieces used by every script: houses, paths, face cropping, the neural network."""
+"""Shared pieces used by every script: houses, paths, faces and their fingerprints, the neural network."""
 import hashlib
 import os
 import sys
@@ -8,11 +8,9 @@ from pathlib import Path
 os.environ.setdefault("OPENCV_LOG_LEVEL", "ERROR")  # hide OpenCV's harmless backend warnings
 import cv2
 import numpy as np
-import torch
 from PIL import Image, ImageOps
 from pillow_heif import register_heif_opener
 from torch import nn
-from torchvision import models, transforms
 
 register_heif_opener()  # lets Pillow open iPhone photos (.HEIC)
 
@@ -21,6 +19,8 @@ HOUSES = ["Gryffindor", "Hufflepuff", "Ravenclaw", "Slytherin"]
 ROOT = Path(__file__).resolve().parent
 RAW_DIR = ROOT / "data" / "raw"          # pictures downloaded by scrape.py
 FACES_DIR = ROOT / "data" / "faces"      # face crops made by prepare.py
+REJECTED_DIR = ROOT / "data" / "rejected"  # face crops prepare.py moved out: they don't look like their character
+FINGERPRINTS_PATH = FACES_DIR / "fingerprints.npz"  # face fingerprints of the crops, computed once
 MODEL_PATH = ROOT / "models" / "sorting_hat.pt"
 QUESTIONS_PATH = ROOT / "questions.json"
 
@@ -31,8 +31,14 @@ FACE_DETECTOR_URL = ("https://github.com/opencv/opencv_zoo/raw/f12e12798e8314f7c
 FACE_DETECTOR_SHA256 = "8f2383e4dd3cfbb4553ea8718107fc0423210dc964f9f4280604804ed2552fa4"
 FACE_DETECTOR_PATH = ROOT / "models" / "face_detection_yunet_2023mar.onnx"
 
-IMG_SIZE = 224
-MEAN, STD = [0.485, 0.456, 0.406], [0.229, 0.224, 0.225]  # ImageNet colour statistics
+# SFace: a face-recognition network from the same model zoo (downloaded once, 39 MB). It turns a face
+# into 128 numbers, a "face fingerprint": photos of the same person get similar fingerprints.
+FACE_RECOGNIZER_URL = ("https://github.com/opencv/opencv_zoo/raw/ba91a3b91d00d76e86540d4013f944bd6b514e39"
+                       "/models/face_recognition_sface/face_recognition_sface_2021dec.onnx")
+FACE_RECOGNIZER_SHA256 = "0ba9fbfa01b5270c96627c4ef784da859931e02f04419c829e83484087c34e79"
+FACE_RECOGNIZER_PATH = ROOT / "models" / "face_recognition_sface_2021dec.onnx"
+
+FINGERPRINT_SIZE = 128  # SFace describes a face with 128 numbers
 
 
 # ---------------------------------------------------------------- images & faces
@@ -44,6 +50,7 @@ def load_image(path):
 
 
 _face_detector = None
+_face_recognizer = None
 
 
 def sha256(path):
@@ -55,26 +62,28 @@ def sha256(path):
     return digest.hexdigest()
 
 
-def face_detector_file():
-    """The YuNet model file: downloaded once, and only used if its fingerprint is the expected one."""
-    if FACE_DETECTOR_PATH.exists() and sha256(FACE_DETECTOR_PATH) == FACE_DETECTOR_SHA256:
-        return FACE_DETECTOR_PATH
-    print("Downloading the face detector (once)...")
-    FACE_DETECTOR_PATH.parent.mkdir(parents=True, exist_ok=True)
-    partial = FACE_DETECTOR_PATH.with_suffix(".part")
-    urllib.request.urlretrieve(FACE_DETECTOR_URL, partial)
-    if sha256(partial) != FACE_DETECTOR_SHA256:
+def model_file(path, url, fingerprint, what):
+    """A model file: downloaded once, and only used if its fingerprint (SHA-256) is the expected one."""
+    if path.exists() and sha256(path) == fingerprint:
+        return path
+    print(f"Downloading the {what} (once)...")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    partial = path.with_suffix(".part")
+    urllib.request.urlretrieve(url, partial)
+    if sha256(partial) != fingerprint:
         partial.unlink()
-        raise SystemExit("The downloaded face detector isn't the expected file, so it won't be used. Try again later.")
-    partial.replace(FACE_DETECTOR_PATH)
-    return FACE_DETECTOR_PATH
+        raise SystemExit(f"The downloaded {what} isn't the expected file, so it won't be used. Try again later.")
+    partial.replace(path)
+    return path
 
 
-def detect_faces(img):
-    """Find faces with YuNet. Returns (x, y, w, h) boxes, biggest first."""
+def detect_face_rows(img):
+    """Find faces with YuNet, biggest first. Each row is x, y, w, h, then five landmarks
+    (eyes, nose tip, mouth corners) as x, y pairs, then how sure the detector is."""
     global _face_detector
     if _face_detector is None:
-        _face_detector = cv2.FaceDetectorYN.create(str(face_detector_file()), "", (320, 320), 0.8, 0.3, 50)
+        path = model_file(FACE_DETECTOR_PATH, FACE_DETECTOR_URL, FACE_DETECTOR_SHA256, "face detector")
+        _face_detector = cv2.FaceDetectorYN.create(str(path), "", (320, 320), 0.8, 0.3, 50)
 
     scale = min(1.0, 800 / max(img.size))  # big phone photos: detect on a smaller copy, it's faster
     small = img.resize((round(img.width * scale), round(img.height * scale))) if scale < 1 else img
@@ -82,8 +91,49 @@ def detect_faces(img):
     _, faces = _face_detector.detect(np.asarray(small)[:, :, ::-1].copy())  # OpenCV wants BGR
     if faces is None:
         return []
-    boxes = [tuple(int(v / scale) for v in f[:4]) for f in faces]
-    return sorted(boxes, key=lambda b: b[2] * b[3], reverse=True)
+    rows = [np.concatenate([face[:14] / scale, face[14:]]).astype(np.float32) for face in faces]
+    return sorted(rows, key=lambda row: row[2] * row[3], reverse=True)
+
+
+def detect_faces(img):
+    """Find faces with YuNet. Returns (x, y, w, h) boxes, biggest first."""
+    return [tuple(int(v) for v in row[:4]) for row in detect_face_rows(img)]
+
+
+def face_fingerprint(img):
+    """The face fingerprint of the biggest face: 128 numbers from SFace, scaled to length 1, so
+    multiplying two fingerprints gives their similarity (1 = identical, around 0 = strangers).
+
+    The face is first straightened using its eyes, nose and mouth. Returns (fingerprint, face_found);
+    without a face it fingerprints the middle of the picture instead.
+    """
+    global _face_recognizer
+    if _face_recognizer is None:
+        path = model_file(FACE_RECOGNIZER_PATH, FACE_RECOGNIZER_URL, FACE_RECOGNIZER_SHA256, "face recognizer")
+        _face_recognizer = cv2.FaceRecognizerSF.create(str(path), "")
+    rows = detect_face_rows(img)
+    if rows:
+        aligned = _face_recognizer.alignCrop(np.asarray(img)[:, :, ::-1].copy(), rows[0])
+    else:
+        aligned = cv2.resize(np.asarray(center_square(img))[:, :, ::-1].copy(), (112, 112))
+    feature = _face_recognizer.feature(aligned).flatten()
+    return feature / np.linalg.norm(feature), bool(rows)
+
+
+def crop_fingerprints(paths):
+    """Face fingerprints of face-crop files, remembered in data/faces/fingerprints.npz so each one is
+    only computed once (delete that file to recompute them all)."""
+    cache = {}
+    if FINGERPRINTS_PATH.exists():
+        saved = np.load(FINGERPRINTS_PATH)
+        cache = dict(zip(saved["paths"].tolist(), saved["prints"]))
+    keys = [str(Path(p).relative_to(FACES_DIR)) for p in paths]
+    missing = [(key, p) for key, p in zip(keys, paths) if key not in cache]
+    for key, p in missing:
+        cache[key] = face_fingerprint(load_image(p))[0]
+    if missing:
+        np.savez(FINGERPRINTS_PATH, paths=np.array(list(cache)), prints=np.stack(list(cache.values())))
+    return np.stack([cache[key] for key in keys]) if keys else np.zeros((0, FINGERPRINT_SIZE), np.float32)
 
 
 def crop_face(img, margin=0.4, strict=False):
@@ -114,48 +164,12 @@ def center_square(img):
     return img.crop((left, top, left + side, top + side))
 
 
-train_transform = transforms.Compose([
-    transforms.RandomResizedCrop(IMG_SIZE, scale=(0.75, 1.0)),
-    transforms.RandomHorizontalFlip(),
-    transforms.RandomRotation(10),
-    transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2),
-    transforms.ToTensor(),
-    transforms.Normalize(MEAN, STD),
-])
-
-eval_transform = transforms.Compose([
-    transforms.Resize((IMG_SIZE, IMG_SIZE)),
-    transforms.ToTensor(),
-    transforms.Normalize(MEAN, STD),
-])
-
-
 # ---------------------------------------------------------------- the neural network
 
-class HouseNet(nn.Module):
-    """ResNet-18 pretrained on ImageNet, with a new last layer that outputs the 4 houses.
-
-    The backbone turns a face into 512 numbers ("features"); the head turns those into house scores.
-    """
-
-    def __init__(self, pretrained=True):
-        super().__init__()
-        self.backbone = models.resnet18(weights=models.ResNet18_Weights.DEFAULT if pretrained else None)
-        self.backbone.fc = nn.Identity()
-        self.head = nn.Sequential(nn.Dropout(0.3), nn.Linear(512, len(HOUSES)))
-
-    def forward(self, x, with_features=False):
-        features = self.backbone(x)
-        logits = self.head(features)
-        return (logits, features) if with_features else logits
-
-
-def get_device():
-    if torch.cuda.is_available():
-        return torch.device("cuda")
-    if torch.backends.mps.is_available():  # Apple Silicon GPU
-        return torch.device("mps")
-    return torch.device("cpu")
+def house_network():
+    """The small neural network that guesses the house from a face fingerprint:
+    128 numbers in, a score for each of the 4 houses out."""
+    return nn.Sequential(nn.Linear(FINGERPRINT_SIZE, 64), nn.ReLU(), nn.Dropout(0.3), nn.Linear(64, len(HOUSES)))
 
 
 # ---------------------------------------------------------------- terminal output

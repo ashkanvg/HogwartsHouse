@@ -392,6 +392,12 @@ function drawLookalikes(people) {
     house.className = "house";
     house.textContent = person.house;
     card.append(name, house);
+    if (typeof person.similarity === "number") {
+      const alike = document.createElement("span");
+      alike.className = "alike";
+      alike.textContent = `${Math.round(Math.max(0, person.similarity) * 100)}% alike`;
+      card.append(alike);
+    }
     box.append(card);
   }
 }

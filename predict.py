@@ -7,11 +7,11 @@ Usage:
 import argparse
 from pathlib import Path
 
+import numpy as np
 import torch
-import torch.nn.functional as F
 
-from common import (HOUSES, MODEL_PATH, HouseNet, center_square, color, crop_face, eval_transform, get_device,
-                    load_image, print_house_scores)
+from common import (HOUSES, MODEL_PATH, center_square, color, crop_face, face_fingerprint, house_network, load_image,
+                    print_house_scores)
 
 
 class HouseClassifier:
@@ -22,15 +22,16 @@ class HouseClassifier:
         if not model_path.exists():
             raise SystemExit(f"No trained model at {model_path} - run python train.py first.")
         checkpoint = torch.load(model_path, map_location="cpu", weights_only=True)
-        self.device = get_device()
-        self.model = HouseNet(pretrained=False)
-        self.model.load_state_dict(checkpoint["model"])
-        self.model.to(self.device).eval()
+        if "network" not in checkpoint:
+            raise SystemExit(f"{model_path} was made by an older version - run python train.py again.")
+        self.network = house_network()
+        self.network.load_state_dict(checkpoint["network"])
+        self.network.eval()
         self.characters = checkpoint["characters"]
         self.character_houses = checkpoint["character_houses"]
-        self.character_features = checkpoint["character_features"]
+        self.character_prints = checkpoint["character_prints"].numpy()
         # calibration from train.py: how sure the network may be, and its favourite houses on new faces
-        self.temperature = checkpoint.get("temperature", 1.0)
+        self.temperature = checkpoint["temperature"]
         self.house_lean = checkpoint["house_lean"]
 
     @torch.no_grad()
@@ -45,15 +46,14 @@ class HouseClassifier:
         face_found = face is not None
         if not face_found:
             face = center_square(img)
-        x = eval_transform(face).unsqueeze(0)
-        x = torch.cat([x, x.flip(-1)]).to(self.device)  # look at the face and its mirror image
-        logits, features = self.model(x, with_features=True)
-        probs = (logits / self.temperature).softmax(1).mean(0).cpu() / self.house_lean
+        fingerprint, _ = face_fingerprint(img)
+        logits = self.network(torch.as_tensor(fingerprint, dtype=torch.float32).unsqueeze(0))[0]
+        probs = (logits / self.temperature).softmax(0) / self.house_lean
         probs = probs / probs.sum()
 
-        similarity = F.normalize(features.mean(0, keepdim=True), dim=1).cpu() @ self.character_features.T
-        top = similarity[0].topk(min(lookalikes, len(self.characters)))
-        look = [(self.characters[i], self.character_houses[i], float(s)) for s, i in zip(top.values, top.indices)]
+        similarity = self.character_prints @ fingerprint  # 1 = the same face, around 0 = strangers
+        closest = np.argsort(-similarity)[:lookalikes]
+        look = [(self.characters[i], self.character_houses[i], float(similarity[i])) for i in closest]
         return {"probs": dict(zip(HOUSES, probs.tolist())), "lookalikes": look, "face_found": face_found, "face": face}
 
 
@@ -70,7 +70,8 @@ def main():
         best = max(probs, key=probs.get)
         print(f"\n{path}" + ("" if result["face_found"] else "   (no face found - used the whole picture)"))
         print_house_scores(probs)
-        print("  Looks a bit like: " + ", ".join(f"{name} ({house})" for name, house, _ in result["lookalikes"]))
+        print("  Looks like: " + ", ".join(f"{name} ({house}, {similarity:.0%} alike)"
+                                           for name, house, similarity in result["lookalikes"]))
         print(f"  -> {color(best.upper(), best)}")
 
 
