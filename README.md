@@ -27,7 +27,7 @@ with (macOS, Python 3.13), use `pip install -r requirements-lock.txt` instead.
 
 | Step | Command | What it does |
 |------|---------|--------------|
-| 1 | `python scrape.py` | Gets every movie character with a house from [HP-API](https://hp-api.onrender.com), then downloads up to 50 pictures each from the [Harry Potter fandom wiki](https://harrypotter.fandom.com) into `data/raw/<House>/<Character>/`. Takes about 10 minutes. |
+| 1 | `python scrape.py --commons` | Gets every movie character with a house from [HP-API](https://hp-api.onrender.com), then downloads up to 50 pictures each from the [Harry Potter fandom wiki](https://harrypotter.fandom.com) into `data/raw/<House>/<Character>/`. With `--commons` it also adds up to 25 freely licensed real-life photos of each actor from Wikimedia Commons. Takes about 10 minutes, or about an hour with `--commons`, because Wikimedia only allows slow downloads. Run it again later to top up. |
 | 2 | `python prepare.py` | Finds the face in each picture and saves a square crop to `data/faces/`. Group photos and pictures with no face are skipped. |
 | 3 | `python train.py` | Trains the neural network and saves it to `models/sorting_hat.pt`. Takes about 1–2 minutes on an Apple Silicon Mac. |
 | 4 | `python predict.py photo.jpg` | Photo only: shows the house scores and which characters the face looks like. |
@@ -36,6 +36,23 @@ with (macOS, Python 3.13), use `pip install -r requirements-lock.txt` instead.
 
 Tip: look through `data/faces/` after step 2 and delete wrong crops (a different person, a
 cartoon, ...). Cleaner pictures give a better model.
+
+### Where the pictures come from
+
+- **Harry Potter fandom wiki:** film stills and promo pictures of each character. This is the
+  main source.
+- **Wikimedia Commons** (`--commons`): real-life photos of the actors, the kind of picture players
+  upload. Only photos with a free licence (Creative Commons or public domain) are used. Wikidata
+  tells the scraper which Commons category belongs to which actor, so "Mark Williams" finds the
+  right Mark Williams. Each folder's `sources.json` credits the photographer and the licence.
+  46 of the 88 actors have photos there: about 600 photos, which gave 435 face crops.
+  Wikimedia limits how fast photos can be downloaded, so the scraper goes slowly. If it gets
+  "too busy" answers, it pauses and leaves the rest for a later run, which tops up.
+- **Other datasets I looked for:**
+  - Kaggle and Hugging Face have no Harry Potter character picture sets, only text and tables.
+  - Roboflow Universe has a few small sets of film stills of the main characters (237–675
+    pictures). They need a free Roboflow account to download.
+  - Big celebrity-face collections such as IMDB-WIKI are for research use only.
 
 ## The graphical game
 
@@ -162,10 +179,21 @@ Useful options: `python train.py --epochs 20`, `--train-all` (fine-tune the whol
 ## Be honest with your friends 😉
 
 Your face doesn't decide your house. The network learns what the *movie characters* look like:
-hair colour, lighting, costume colours, the actors themselves. With the current data (about
-1,000 face crops of 81 characters), it gets 96% right on characters it trained on, but only
-about 31% on characters it has never seen. Random guessing gets 25%. So the face gives a hint and
-breaks ties, and your answers decide. It's a game!
+hair colour, lighting, costume colours, the actors themselves. On characters it trained on it
+gets almost everything right, but on characters it has never seen it scores about the same as
+random guessing (25%).
+
+Adding 435 real-life photos of the actors didn't change that. I tested it fairly: models trained
+with and without those photos, three times each, all tested on the same 16 unseen characters.
+
+| | Film stills | Real-life photos |
+|---|---|---|
+| Without the actor photos | 27% | 25% |
+| With the actor photos | 30% | 21% |
+
+The differences are within the normal variation between runs. So the face gives a hint and
+breaks ties, and your answers decide. The look-alikes are the fun part of the face, and they now
+include the actors' real-life photos. It's a game!
 
 ## Tests
 
