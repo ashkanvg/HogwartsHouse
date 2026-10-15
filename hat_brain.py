@@ -33,11 +33,23 @@ MURMURS = ["Interesting...", "I see...", "Yes, yes...", "Oh, that's telling...",
 
 
 def load_questions(path=QUESTIONS_PATH):
+    """Read the question bank and check it, so a typo gives a clear message instead of a crash mid-game."""
     questions = json.loads(Path(path).read_text())["questions"]
-    for q in questions:
+    if not questions:
+        raise SystemExit(f"{path}: there are no questions")
+    for number, q in enumerate(questions, 1):
+        name = q.get("id", f"number {number}")
+        for key in ("id", "text", "yes", "no"):
+            if key not in q:
+                raise SystemExit(f"{path}: question '{name}' has no \"{key}\"")
         for answer in ("yes", "no"):
-            if not set(q.get(answer, {})) <= set(HOUSES):
-                raise SystemExit(f"{path}: the '{answer}' of question '{q['id']}' names an unknown house")
+            scores = q[answer]
+            if not (isinstance(scores, dict) and scores and set(scores) <= set(HOUSES)
+                    and all(isinstance(p, (int, float)) and p > 0 for p in scores.values())):
+                raise SystemExit(f"{path}: the \"{answer}\" of question '{name}' must give points to houses, "
+                                 f'like {{"Gryffindor": 2}}')
+        if q.get("nicer") not in (None, "yes", "no"):
+            raise SystemExit(f"{path}: \"nicer\" of question '{name}' must be \"yes\" or \"no\"")
     if len({q["id"] for q in questions}) != len(questions):
         raise SystemExit(f"{path}: two questions have the same id")
     return questions
@@ -94,8 +106,10 @@ def next_question(questions, asked, probs, rng):
     return rng.choice(remaining)
 
 
-def done_asking(probs, n_asked, min_questions=MIN_QUESTIONS, max_questions=MAX_QUESTIONS, sure=SURE):
-    """Stop at the maximum, or earlier once the leading house is far enough ahead."""
+def done_asking(probs, n_asked, min_questions=MIN_QUESTIONS, max_questions=MAX_QUESTIONS, sure=SURE, n_questions=None):
+    """Stop at the maximum (or when the questions run out), or earlier once the leading house is far enough ahead."""
+    if n_questions is not None:
+        max_questions = min(max_questions, n_questions)
     first, second = sorted(probs, reverse=True)[:2]
     return n_asked >= max_questions or (n_asked >= min_questions and first - second >= sure)
 

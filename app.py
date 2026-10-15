@@ -65,10 +65,11 @@ def read_face():
     if classifier is None:
         return jsonify(error="The hat has no eyes yet: run python train.py first."), 400
     try:
-        photo = base64.b64decode(request.get_json()["image"].split(",", 1)[-1])
+        photo = base64.b64decode((request.get_json(silent=True) or {})["image"].split(",", 1)[-1])
         with lock:
             result = classifier.predict(io.BytesIO(photo))
     except Exception:
+        app.logger.exception("Could not read the photo")  # the full error goes to the terminal
         return jsonify(error="That doesn't look like a picture."), 400
     return jsonify(
         probs=result["probs"],
@@ -82,17 +83,19 @@ def read_face():
 @app.post("/api/turn")
 def turn():
     """Takes the game so far (face, asked, points, and maybe a new answer) and returns what's next."""
-    data = request.get_json()
+    data = request.get_json(silent=True) or {}
     face, asked, points = data.get("face"), list(data.get("asked", [])), list(data.get("points", [0] * len(HOUSES)))
     old_probs = brain.combine(face, points)
     answer = data.get("answer")
     if answer:
-        question = QUESTIONS_BY_ID[answer["id"]]
+        question = QUESTIONS_BY_ID.get(answer.get("id"))
+        if question is None or question["id"] in asked or not isinstance(answer.get("yes"), bool):
+            return jsonify(error="The hat doesn't know that question, or it was already answered."), 400
         points = brain.add_answer(points, question, answer["yes"])
         asked.append(question["id"])
     probs = brain.combine(face, points)
     reply = {"asked": asked, "points": points, "probs": dict(zip(HOUSES, probs))}
-    if brain.done_asking(probs, len(asked)):
+    if brain.done_asking(probs, len(asked), n_questions=len(QUESTIONS)):
         reply["tie"] = brain.near_tie(probs, rng)
     else:
         question = brain.next_question(QUESTIONS, asked, probs, rng)
@@ -104,7 +107,9 @@ def turn():
 
 @app.post("/api/result")
 def result():
-    data = request.get_json()
+    data = request.get_json(silent=True) or {}
+    if len(data.get("points", [])) != len(HOUSES):
+        return jsonify(error="The hat needs the points of all four houses."), 400
     probs = brain.combine(data.get("face"), data["points"])
     house, final = brain.decide(probs, data.get("prefer"))
     return jsonify(house=house, probs=final)
