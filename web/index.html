@@ -53,7 +53,8 @@
         </g>
         <ellipse class="mouth" cx="116" cy="166" rx="21" ry="5" fill="#160d05"/>
       </svg>
-      <p id="speech" aria-live="polite"></p>
+      <p id="speech" aria-hidden="true"></p>
+      <p id="speech-sr" class="sr-only" aria-live="polite"></p>
     </div>
 
     <section class="card" id="step-enter">
@@ -81,6 +82,7 @@
 
     <section class="card" id="step-thinking" hidden>
       <div class="dots"><span></span><span></span><span></span></div>
+      <div class="buttons"><button id="retry" class="primary" hidden>Try again</button></div>
     </section>
 
     <section class="card" id="step-face" hidden>

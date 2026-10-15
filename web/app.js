@@ -66,10 +66,20 @@ function speak(text, { pitch = voice.pitch, rate = voice.rate } = {}) {
 }
 
 let typing = null;
+const calm = window.matchMedia("(prefers-reduced-motion: reduce)").matches; // the computer asks for less motion
+
+function announce(text) {
+  $("#speech-sr").textContent = text; // screen readers read the whole sentence once
+}
 
 function showSpeech(text) {
+  announce(text);
   clearInterval(typing);
   const bubble = $("#speech");
+  if (calm) {
+    bubble.textContent = text;
+    return;
+  }
   let shown = 0;
   typing = setInterval(() => {
     bubble.textContent = text.slice(0, ++shown);
@@ -87,13 +97,28 @@ async function say(text, options) {
 const STEPS = ["enter", "start", "thinking", "face", "question", "tie", "result"];
 const game = { face: null, asked: [], points: [0, 0, 0, 0], question: null };
 let flow = 0; // goes up at every new step, so an older step that is still talking stops quietly
+let busy = false; // waiting for the server, so a double click can't answer twice
+let retry = null; // what the "Try again" button does after a failed request
 
 function newStep(name) {
   flow += 1;
   if (canSpeak) speechSynthesis.cancel();
   for (const step of STEPS) $(`#step-${step}`).hidden = step !== name;
   $("#hat").classList.toggle("thinking", name === "thinking");
+  $("#retry").hidden = true;
   return flow;
+}
+
+function setAnswerButtons(on) {
+  $("#answer-yes").disabled = $("#answer-no").disabled = !on;
+}
+
+async function offerRetry(me, action) {
+  // The server didn't answer: let the student try again instead of freezing.
+  if (me !== flow) return;
+  retry = action;
+  $("#retry").hidden = false;
+  await say("Hmm, I lost my train of thought... Is app.py still running? Press Try again.");
 }
 
 async function post(url, body) {
@@ -154,19 +179,28 @@ async function nextTurn(answer) {
   flow += 1; // a new step, but keep the current card on screen while the hat thinks
   const me = flow;
   if (canSpeak) speechSynthesis.cancel();
-  $("#answer-yes").disabled = $("#answer-no").disabled = true;
+  busy = true;
+  setAnswerButtons(false);
   let reply;
   try {
     reply = await post("/api/turn", { face: game.face, asked: game.asked, points: game.points, answer });
   } catch (error) {
-    if (me === flow) await say("The hat seems to have dozed off... is app.py still running?");
+    busy = false;
+    if (me !== flow) return;
+    if (answer) { // still on the same question: the student can simply answer again
+      setAnswerButtons(true);
+      await say("Hmm, I didn't catch that... Is app.py still running? Answer again when it is.");
+    } else {
+      await offerRetry(me, () => nextTurn(null));
+    }
     return;
   }
+  busy = false;
   if (me !== flow) return;
   game.asked = reply.asked;
   game.points = reply.points;
+  game.question = reply.question || null;
   if (reply.question) {
-    game.question = reply.question;
     $("#question-number").textContent = `Question ${reply.question.number}`;
     const text = $("#question-text");
     text.textContent = reply.question.text;
@@ -174,11 +208,12 @@ async function nextTurn(answer) {
     void text.offsetWidth; // restart the fade-in animation
     text.classList.add("fade");
     const shown = newStep("question");
-    $("#answer-yes").disabled = $("#answer-no").disabled = false;
+    setAnswerButtons(true);
     if (reply.whisper) {
       await say(reply.whisper);
       if (shown !== flow) return;
     }
+    announce(`Question ${reply.question.number}: ${reply.question.text}`);
     await speak(reply.question.text);
   } else if (reply.tie) {
     await askPreference(reply.tie);
@@ -188,10 +223,8 @@ async function nextTurn(answer) {
 }
 
 function answer(yes) {
-  if ($("#step-question").hidden || !game.question) return;
-  const id = game.question.id;
-  game.question = null;
-  nextTurn({ id, yes });
+  if ($("#step-question").hidden || !game.question || busy) return;
+  nextTurn({ id: game.question.id, yes });
 }
 
 async function askPreference(houses) {
@@ -221,7 +254,7 @@ async function reveal(prefer) {
   try {
     result = await post("/api/result", { face: game.face, points: game.points, prefer });
   } catch (error) {
-    if (me === flow) await say("The hat seems to have dozed off... is app.py still running?");
+    await offerRetry(me, () => reveal(prefer));
     return;
   }
   if (me !== flow) return;
@@ -235,7 +268,7 @@ async function reveal(prefer) {
   $("#banner-words").textContent = HOUSE_INFO[house].words;
   newStep("result");
   drawBars($("#final-bars"), result.probs);
-  sparkle(house);
+  if (!calm) sparkle(house);
   await say(`${house.toUpperCase()}!`, { pitch: 0.95, rate: 0.8 });
 }
 
@@ -407,9 +440,20 @@ async function init() {
     store("hatVoice", voice.chosen ? voice.chosen.name : "");
     say("Hmm... is this how I sound?");
   };
+  $("#retry").onclick = () => {
+    const action = retry;
+    retry = null;
+    $("#retry").hidden = true;
+    showSpeech("Ah, there we are...");
+    if (action) action();
+  };
   document.addEventListener("keydown", (event) => {
-    if (event.key === "y" || event.key === "Y") answer(true);
-    if (event.key === "n" || event.key === "N") answer(false);
+    // Only a plain Y or N: Cmd+N opens a new window, and typing in the voice menu isn't an answer.
+    if (event.metaKey || event.ctrlKey || event.altKey || event.repeat) return;
+    if (event.target instanceof Element && event.target.closest("select, input, textarea")) return;
+    const key = event.key.toLowerCase();
+    if (key === "y") answer(true);
+    if (key === "n") answer(false);
   });
   document.addEventListener("dragover", (event) => event.preventDefault());
   document.addEventListener("drop", (event) => {
