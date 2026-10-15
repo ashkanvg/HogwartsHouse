@@ -20,6 +20,9 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
+`requirements.txt` allows a range of versions. To install exactly the versions this was tested
+with (macOS, Python 3.13), use `pip install -r requirements-lock.txt` instead.
+
 ## Run it, step by step
 
 | Step | Command | What it does |
@@ -45,6 +48,9 @@ python app.py        # opens http://127.0.0.1:5050 in your browser
 - The hat shows what it sees in your face and which characters you look like, then asks its
   questions out loud. Answer with the **Yes / No** buttons, or the <kbd>Y</kbd> / <kbd>N</kbd> keys.
 - A shield in your house colours, with sparkles, announces the result.
+- If the server hiccups, just answer again, or press **Try again**.
+- It works with the keyboard (<kbd>Tab</kbd>, <kbd>Enter</kbd>, <kbd>Y</kbd>/<kbd>N</kbd>) and with
+  screen readers. The animations stop if your computer is set to reduce motion.
 
 ### The hat's voice
 
@@ -93,26 +99,38 @@ All the thinking is in `hat_brain.py`, shared by both versions.
 4. **Near tie:** the hat asks which house *you* would prefer. It takes your choice into account,
    just like it did for Harry.
 
-In a simulation of thousands of students who always answer in favour of their true house, the
-hat sorted 100% of them correctly with no photo. Students who answer at random end up spread
-evenly: 25% in each house.
+Simulations show the hat is fair:
+- Students who always answer in favour of their true house: 100% sorted correctly, even with no
+  photo.
+- Students who answer at random: spread evenly, 25% in each house.
+- Students who sometimes give the answer that sounds nicer (like handing back lost Galleons): the
+  questions are written so this doesn't push anyone away from a house. If they give the nicer
+  answer 30% of the time, every house is still recognised 93–96% of the time. (An earlier
+  version of the questions found only 67% of true Slytherins.)
 
 ### Your own questions
 
 `questions.json` has 20 yes/no questions inspired by the books and movies: the troll, the
-Triwizard dragon, screaming Mandrakes, the Ravenclaw riddle door, Chocolate Frog cards, and more.
-They're balanced: every house gets exactly 5 "yes" and 5 "no" chances. Add or change them freely:
+Triwizard dragon, Mandrakes, the Ravenclaw riddle door, Chocolate Frog cards, and more. Add or
+change them freely:
 
 ```json
-{"id": "dragon", "text": "Would you volunteer to face a dragon in the Triwizard Tournament?",
- "yes": {"Gryffindor": 2}, "no": {"Ravenclaw": 2}}
+{"id": "troll", "text": "A troll is loose in the castle and a classmate is missing. Would you go looking for them yourself?",
+ "yes": {"Gryffindor": 2}, "no": {"Slytherin": 2}, "nicer": "yes"}
 ```
+
+Keep the bank fair:
+- Every house should get the same number of *yes* and *no* chances. Right now that's 5 of each.
+- Both answers should be easy to say out loud. If one answer sounds nicer anyway, mark it with
+  `"nicer"`, and balance it with another question whose nicer answer helps the house this one hurts.
+- Run `pytest` afterwards: it checks all of this (see [Tests](#tests)).
 
 ## How the neural network works
 
 - **Face finding:** [YuNet](https://github.com/opencv/opencv_zoo/tree/main/models/face_detection_yunet),
   a small face-detection network included with OpenCV. Its model file (230 KB) downloads
-  automatically into `models/` the first time.
+  automatically into `models/` the first time. It comes from one fixed version, and is only used
+  if its fingerprint (SHA-256) matches.
 - **Classifier:** transfer learning with a ResNet-18 pretrained on ImageNet. Its last layer is
   replaced with a 4-house layer, then the last block and the new layer are fine-tuned on the face
   crops. Rarer houses get extra weight in the loss, because there are far more Gryffindor pictures.
@@ -139,6 +157,18 @@ hair colour, lighting, costume colours, the actors themselves. With the current 
 about 31% on characters it has never seen. Random guessing gets 25%. So the face gives a hint and
 breaks ties, and your answers decide. It's a game!
 
+## Tests
+
+```bash
+pytest
+```
+
+The tests take a few seconds and don't need a trained model. They check three things:
+- The question bank is fair, and broken questions give a clear message.
+- Simulated students are sorted correctly and fairly: honest ones, random ones, ones who like
+  nicer answers, and ones whose face points to the wrong house.
+- The web server handles both good and bad requests.
+
 ## Files
 
 ```
@@ -152,6 +182,8 @@ scrape.py        step 1 – download character pictures
 prepare.py       step 2 – crop faces
 train.py         step 3 – train and calibrate the network
 predict.py       step 4 – house from a photo only
+tests/           the tests (run with: pytest)
+requirements.txt / requirements-lock.txt   allowed versions / exact tested versions
 data/            downloaded pictures and face crops (not in git)
 models/          trained network and face detector (not in git)
 ```
