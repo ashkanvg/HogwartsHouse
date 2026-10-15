@@ -171,7 +171,7 @@ def character_folder(character):
 
 def scrape_character(character, per_character, matches):
     folder = character_folder(character)
-    if pictures := [p for p in folder.glob("*.jpg") if not p.name.startswith("commons_")]:
+    if pictures := [p for p in folder.glob("*.jpg") if not p.name.startswith(("commons_", "roboflow_"))]:
         return len(pictures), "already downloaded"
 
     def useful(file_titles):
@@ -185,22 +185,25 @@ def scrape_character(character, per_character, matches):
     urls = ([character["image"]] if character["image"] else []) + wiki_image_urls(titles[:per_character * 2])
 
     folder.mkdir(parents=True, exist_ok=True)
-    sources, seen = {}, set()
+    sources_file = folder / "sources.json"
+    sources = json.loads(sources_file.read_text()) if sources_file.exists() else {}  # keeps the actor photos' credits
+    count, seen = 0, set()
     pool = ThreadPoolExecutor(max_workers=8)
     try:
         for url, img in zip(urls, pool.map(download_image, urls)):
             if img is None or (key := fingerprint(img)) in seen:
                 continue
             seen.add(key)
-            filename = f"{len(sources):03d}.jpg"
+            filename = f"{count:03d}.jpg"
             img.save(folder / filename, quality=90)
             sources[filename] = url
-            if len(sources) >= per_character:
+            count += 1
+            if count >= per_character:
                 break
     finally:
         pool.shutdown(cancel_futures=True)
-    (folder / "sources.json").write_text(json.dumps(sources, indent=1))  # where each picture came from
-    return len(sources), f"{len(titles)} matching files on the wiki"
+        sources_file.write_text(json.dumps(sources, indent=1))  # where each picture came from
+    return count, f"{len(titles)} matching files on the wiki"
 
 
 # ---------------------------------------------------------------- real-life photos of the actors (--commons)
@@ -213,7 +216,8 @@ BRITISH_ACTOR = re.compile(r"\b(english|british|scottish|welsh|irish)\b.*\b(acto
 NOT_JUST_THEM = re.compile(  # wax figures, signatures, art, and photos of several people
     r"wax|tussaud|signature|autograph|drawing|painting|sculpture|statue|cosplay|poster|mural|graffiti"
     r"|caricature|\bart\b| & | and |\bwith\b", re.IGNORECASE)
-FREE_LICENCE = re.compile(r"^(cc0|cc[ -]by|public domain|pd\b)", re.IGNORECASE)
+# CC BY and CC BY-SA (any version), CC0 and public domain - not the "non-commercial" or "no derivatives" kinds
+FREE_LICENCE = re.compile(r"^(?!.*\bn[cd]\b)(?:cc0|cc[ -]by(?:[ -]sa)?\b|public domain|pd\b)", re.IGNORECASE)
 PHOTO_WIDTH = 500  # one of Wikimedia's standard thumbnail sizes, cheap for it to make
 BUSY_PAUSE = 60    # seconds to wait when Wikimedia says it's too busy
 
@@ -340,20 +344,25 @@ def scrape_actor_photos(character, category, limit, other_actors):
     """Add real-life photos of the character's actor to the character's folder.
 
     Running it again tops up actors that got fewer photos (for example when Wikimedia was busy),
-    without downloading the same photo twice.
+    without downloading the same photo twice. It also writes down the photographer and licence
+    again for photos whose credit is missing from sources.json.
     """
     folder = character_folder(character)
-    saved = len(list(folder.glob("commons_*.jpg")))
-    if saved >= limit:
-        return saved, "already downloaded"
-    folder.mkdir(parents=True, exist_ok=True)
     sources_file = folder / "sources.json"
     sources = json.loads(sources_file.read_text()) if sources_file.exists() else {}
+    saved = len(list(folder.glob("commons_*.jpg")))
+    uncredited = {fingerprint(Image.open(p).convert("RGB")): p.name
+                  for p in folder.glob("commons_*.jpg") if p.name not in sources}
+    if saved >= limit and not uncredited:
+        return saved, "already downloaded"
+    folder.mkdir(parents=True, exist_ok=True)
     have = {s["url"] for s in sources.values() if isinstance(s, dict)}  # Commons photos we already have
     photos = [p for p in commons_photos(category, limit * 2, other_actors) if p["page"] not in have]
     seen = {fingerprint(Image.open(p).convert("RGB")) for p in folder.glob("*.jpg")}  # skip copies of our pictures
     busy = 0
     for photo in photos:
+        if saved >= limit and not uncredited:
+            break
         time.sleep(2)  # one download at a time, gently: Wikimedia turns away clients that hurry
         img, too_busy = download_commons_photo(photo["url"])
         if too_busy:
@@ -362,16 +371,20 @@ def scrape_actor_photos(character, category, limit, other_actors):
                 break
             time.sleep(BUSY_PAUSE)
             continue
-        if img is None or (key := fingerprint(img)) in seen:
+        if img is None:
             continue
-        seen.add(key)
-        name = f"commons_{saved:03d}.jpg"
-        img.save(folder / name, quality=90)
-        sources[name] = {"url": photo["page"], "author": photo["author"], "licence": photo["licence"]}
-        saved += 1
-        if saved >= limit:
-            break
-    sources_file.write_text(json.dumps(sources, indent=1))
+        credit = {"url": photo["page"], "author": photo["author"], "licence": photo["licence"]}
+        if (key := fingerprint(img)) in uncredited:  # a photo we have, but its credit got lost
+            sources[uncredited.pop(key)] = credit
+        elif key in seen or saved >= limit:
+            continue
+        else:
+            seen.add(key)
+            name = f"commons_{saved:03d}.jpg"
+            img.save(folder / name, quality=90)
+            sources[name] = credit
+            saved += 1
+        sources_file.write_text(json.dumps(sources, indent=1))  # straight away: a stopped run keeps every credit
     return saved, f"Commons Category:{category}"
 
 
