@@ -113,8 +113,9 @@ def read_face():
         probs=result["probs"],
         face_found=result["face_found"],
         face=data_url(result["face"], 320),
-        lookalikes=[{"name": name, "house": house, "picture": character_picture(name, house)}
-                    for name, house, _ in result["lookalikes"]],
+        lookalikes=[{"name": name, "house": house, "similarity": round(similarity, 3),
+                     "picture": character_picture(name, house)}
+                    for name, house, similarity in result["lookalikes"]],
     )
 
 

@@ -28,14 +28,14 @@ with (macOS, Python 3.13), use `pip install -r requirements-lock.txt` instead.
 | Step | Command | What it does |
 |------|---------|--------------|
 | 1 | `python scrape.py --commons` | Gets every movie character with a house from [HP-API](https://hp-api.onrender.com), then downloads up to 50 pictures each from the [Harry Potter fandom wiki](https://harrypotter.fandom.com) into `data/raw/<House>/<Character>/`. With `--commons` it also adds up to 25 freely licensed real-life photos of each actor from Wikimedia Commons. Takes about 10 minutes, or about an hour with `--commons`, because Wikimedia only allows slow downloads. Run it again later to top up. |
-| 2 | `python prepare.py` | Finds the face in each picture and saves a square crop to `data/faces/`. Group photos and pictures with no face are skipped. |
-| 3 | `python train.py` | Trains the neural network and saves it to `models/sorting_hat.pt`. Takes about 1–2 minutes on an Apple Silicon Mac. |
-| 4 | `python predict.py photo.jpg` | Photo only: shows the house scores and which characters the face looks like. |
+| 2 | `python prepare.py` | Finds the face in each picture and saves a square crop to `data/faces/`. Group photos and pictures with no face are skipped. Then it cleans: faces that don't look like the rest of their character (cartoons, LEGO, the wrong person) are moved to `data/rejected/`. |
+| 3 | `python train.py` | Makes a face fingerprint for every face, tests and trains the house network, and saves everything to `models/sorting_hat.pt`. Takes a few seconds (about 30 the very first time). |
+| 4 | `python predict.py photo.jpg` | Photo only: shows the house scores and which characters the face looks most like. |
 | 5 | `python app.py` | **The game, graphical version**: opens in your browser. |
 | 5b | `python sorting_hat.py` | The same game in the terminal. |
 
-Tip: look through `data/faces/` after step 2 and delete wrong crops (a different person, a
-cartoon, ...). Cleaner pictures give a better model.
+Tip: have a look at `data/rejected/` after step 2. If a good picture was moved there by mistake,
+move it back to `data/faces/` and run `python prepare.py --no-clean`.
 
 ### Where the pictures come from
 
@@ -154,46 +154,72 @@ Keep the bank fair:
 
 ## How the neural network works
 
-- **Face finding:** [YuNet](https://github.com/opencv/opencv_zoo/tree/main/models/face_detection_yunet),
-  a small face-detection network included with OpenCV. Its model file (230 KB) downloads
-  automatically into `models/` the first time. It comes from one fixed version, and is only used
-  if its fingerprint (SHA-256) matches.
-- **Classifier:** transfer learning with a ResNet-18 pretrained on ImageNet. Its last layer is
-  replaced with a 4-house layer, then the last block and the new layer are fine-tuned on the face
-  crops. Rarer houses get extra weight in the loss, because there are far more Gryffindor pictures.
-- **Honest validation:** `train.py` holds out whole *characters*, not just some of their
-  pictures. The validation score therefore measures faces the model has never seen, which is
-  the real game. Random guessing scores 25%.
-- **Calibration:** on faces it has never seen, the network was far too sure of itself. It would
-  say "82% Ravenclaw" while being right only about 31% of the time. `train.py` uses the held-out
-  characters for two fixes, and `predict.py` applies both:
-  - It learns a *temperature* (about 5): the scores are divided by it, which softens the
-    probabilities until they match how often the network is really right.
-  - It measures which houses the network still leans towards on new faces, and divides that out.
-- **Look-alikes:** the average face features of each character are saved with the model, so the
-  hat can tell you who you resemble.
+Three neural networks work together:
 
-Useful options: `python train.py --epochs 20`, `--train-all` (fine-tune the whole network), and
-`--val-split 0` (train on every character; this also skips calibration).
+1. **Finding the face:** [YuNet](https://github.com/opencv/opencv_zoo/tree/main/models/face_detection_yunet),
+   a small face-detection network included with OpenCV. It also finds the eyes, nose and mouth.
+2. **The face fingerprint:** [SFace](https://github.com/opencv/opencv_zoo/tree/main/models/face_recognition_sface),
+   a face-recognition network trained on millions of faces. It straightens the face using the
+   eyes, nose and mouth, then describes it with 128 numbers. Photos of the same person get similar
+   numbers, whatever the lighting or clothes.
+3. **The house network:** a small neural network that `train.py` trains to guess the house from a
+   fingerprint. It takes a few seconds. Rarer houses count extra, because there are far more
+   Gryffindor pictures.
+
+Both OpenCV models download once into `models/` (230 KB and 39 MB). Each comes from one fixed
+version and is only used if its fingerprint (SHA-256) matches.
+
+- **Look-alikes:** each character's typical fingerprint is the average of its faces'
+  fingerprints. Your look-alikes are the characters whose fingerprint is closest to yours
+  ("67% alike").
+- **Cleaning:** `prepare.py` compares every face with the rest of its character. Faces that don't
+  match (cartoons, LEGO figures, drawings, the wrong person) go to `data/rejected/`. On the
+  current pictures it caught 44, nearly all of them real mistakes.
+- **Honest testing (cross-validation):** `train.py` splits the characters into 5 groups. It
+  guesses each group with a network trained only on the other 4, so every guess is about
+  characters the network has never seen. Random guessing scores 25%.
+- **Calibration:** on new faces the network is far too sure of itself, so `train.py` uses those
+  honest guesses for two fixes that `predict.py` applies:
+  - A *temperature* (about 7) softens the probabilities until they match how often it's really
+    right.
+  - A correction for the houses it still leans towards.
+
+### Before and after the face fingerprints
+
+The look-alikes used to come from a ResNet-18 fine-tuned to guess houses. Its features described
+houses, not people. Tested on all 1,415 faces of 82 characters (random guessing: about 1%):
+
+| Look-alike test | Before (ResNet) | After (SFace) |
+|---|---|---|
+| A real-life actor photo finds the right movie character | 14% | **86%** (top 3: 93%) |
+| A film still finds its own character (with that still left out) | 57% | **83%** (top 3: 88%) |
+
+For the house hint, three methods were compared with the same cross-validation:
+
+| House guess on unseen characters | All faces | Film stills | Real-life photos |
+|---|---|---|---|
+| ResNet fine-tuned on face pixels (before) | 30% | 30% | 30% |
+| Small network on SFace fingerprints (now) | 30% | 32% | 25% |
+| Vote by your closest look-alikes | 25% | 28% | 19% |
+
+These scores include the calibration's house correction. The house hint is a tie, so the game uses
+the simpler option: the small network trains in seconds instead of minutes and uses the same
+fingerprint as the look-alikes.
+
+Useful options: `python train.py --folds 10` (more, smaller groups) and `--epochs 500`.
 
 ## Be honest with your friends 😉
 
-Your face doesn't decide your house. The network learns what the *movie characters* look like:
-hair colour, lighting, costume colours, the actors themselves. On characters it trained on it
-gets almost everything right, but on characters it has never seen it scores about the same as
-random guessing (25%).
+Your face doesn't decide your house. On characters it has never seen, every method tried here
+scores close to random guessing (25%): the ResNet on pixels, the network on face fingerprints,
+and the look-alike vote (see the table above).
 
-Adding 435 real-life photos of the actors didn't change that. I tested it fairly: models trained
-with and without those photos, three times each, all tested on the same 16 unseen characters.
+Adding 435 real-life photos of the actors didn't change that either. I trained models with and
+without them, three times each, and tested them on the same 16 unseen characters. The scores
+stayed between 21% and 30%, within the normal variation between runs.
 
-| | Film stills | Real-life photos |
-|---|---|---|
-| Without the actor photos | 27% | 25% |
-| With the actor photos | 30% | 21% |
-
-The differences are within the normal variation between runs. So the face gives a hint and
-breaks ties, and your answers decide. The look-alikes are the fun part of the face, and they now
-include the actors' real-life photos. It's a game!
+So the face gives a hint and breaks ties, and your answers decide. The look-alikes are the part
+of the face that really works: a photo of Tom Felton finds Draco. It's a game!
 
 ## Tests
 
@@ -206,6 +232,10 @@ The tests take a few seconds and don't need a trained model. They check three th
 - Simulated students are sorted correctly and fairly: honest ones, random ones, ones who like
   nicer answers, and ones whose face points to the wrong house.
 - The web server handles both good and bad requests.
+- Cleaning, training and predicting work: strangers among a character's photos are caught,
+  every character stays in one cross-validation group, the network learns houses it can tell
+  apart, calibration tones down an overconfident network, and look-alikes come out in the right
+  order.
 - The hat's voice makes slower, deeper, evenly loud lines, each only once. This uses a fake
   speech engine, so the 350 MB model isn't needed.
 
@@ -220,13 +250,13 @@ hat_brain.py     the hat's thinking: questions, scores, tournament, decision
 questions.json   the Sorting Hat's yes/no questions
 common.py        shared code: houses, paths, face cropping, the network
 scrape.py        step 1 – download character pictures
-prepare.py       step 2 – crop faces
-train.py         step 3 – train and calibrate the network
+prepare.py       step 2 – crop faces and clean out wrong ones
+train.py         step 3 – face fingerprints, look-alikes, the house network
 predict.py       step 4 – house from a photo only
 tests/           the tests (run with: pytest)
 requirements.txt / requirements-lock.txt   allowed versions / exact tested versions
-data/            downloaded pictures and face crops (not in git)
-models/          trained network, face detector and voice model (not in git)
+data/            downloaded pictures, face crops and rejected crops (not in git)
+models/          house network, face detector, face recognizer, voice model (not in git)
 ```
 
 The pictures are © their owners (Warner Bros. and others). They are only used locally to train
