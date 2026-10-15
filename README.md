@@ -28,6 +28,7 @@ with (macOS, Python 3.13), use `pip install -r requirements-lock.txt` instead.
 | Step | Command | What it does |
 |------|---------|--------------|
 | 1 | `python scrape.py --commons` | Gets every movie character with a house from [HP-API](https://hp-api.onrender.com), then downloads up to 50 pictures each from the [Harry Potter fandom wiki](https://harrypotter.fandom.com) into `data/raw/<House>/<Character>/`. With `--commons` it also adds up to 25 freely licensed real-life photos of each actor from Wikimedia Commons. Takes about 10 minutes, or about an hour with `--commons`, because Wikimedia only allows slow downloads. Run it again later to top up. |
+| 1b | `python import_roboflow.py <zip>` | Optional: adds film stills from a Roboflow dataset (see below). |
 | 2 | `python prepare.py` | Finds the face in each picture and saves a square crop to `data/faces/`. Group photos and pictures with no face are skipped. Then it cleans: faces that don't look like the rest of their character (cartoons, LEGO, the wrong person) are moved to `data/rejected/`. |
 | 3 | `python train.py` | Makes a face fingerprint for every face, tests and trains the house network, and saves everything to `models/sorting_hat.pt`. Takes a few seconds (about 30 the very first time). |
 | 4 | `python predict.py photo.jpg` | Photo only: shows the house scores and which characters the face looks most like. |
@@ -42,17 +43,40 @@ move it back to `data/faces/` and run `python prepare.py --no-clean`.
 - **Harry Potter fandom wiki:** film stills and promo pictures of each character. This is the
   main source.
 - **Wikimedia Commons** (`--commons`): real-life photos of the actors, the kind of picture players
-  upload. Only photos with a free licence (Creative Commons or public domain) are used. Wikidata
-  tells the scraper which Commons category belongs to which actor, so "Mark Williams" finds the
-  right Mark Williams. Each folder's `sources.json` credits the photographer and the licence.
-  46 of the 88 actors have photos there: about 600 photos, which gave 435 face crops.
+  upload. Only photos under CC BY, CC BY-SA, CC0 or public domain are used (no "non-commercial"
+  or "no derivatives" licences). Wikidata tells the scraper which Commons category belongs to
+  which actor, so "Mark Williams" finds the right Mark Williams. Each folder's `sources.json`
+  credits the photographer and the licence, written straight after each photo. If a credit ever
+  goes missing, the next `--commons` run writes it down again. 46 of the 88 actors have photos
+  there: about 600 photos, which gave 435 face crops (429 after cleaning).
   Wikimedia limits how fast photos can be downloaded, so the scraper goes slowly. If it gets
   "too busy" answers, it pauses and leaves the rest for a later run, which tops up.
+- **Roboflow Universe** (optional): [Harry potter character detection](https://universe.roboflow.com/leanse-sangeerth-6o0b2/harry-potter-character-detection)
+  by Leanse Sangeerth, listed under CC BY 4.0: 675 film stills with a box around each of 13 main
+  characters (9 Gryffindors, 3 Slytherins, 1 Ravenclaw). Downloading it needs a free Roboflow
+  account: on that page click **Download Dataset**, choose **COCO JSON** and **Download zip to
+  computer**. Then `python import_roboflow.py <the zip>` cuts out every labelled character into
+  their folder (`roboflow_000.jpg`, ...), and `sources.json` records the still and the licence.
+  Run `python prepare.py` and `python train.py` again afterwards.
 - **Other datasets I looked for:**
   - Kaggle and Hugging Face have no Harry Potter character picture sets, only text and tables.
-  - Roboflow Universe has a few small sets of film stills of the main characters (237–675
-    pictures). They need a free Roboflow account to download.
+  - The other Roboflow sets are smaller (237 stills) and show the same main characters.
   - Big celebrity-face collections such as IMDB-WIKI are for research use only.
+
+### Did the extra pictures help?
+
+Tested with the same 5-group cross-validation as `train.py`, repeated with 10 different groupings.
+Each time the house network is trained with and without the extra pictures, and both are tested on
+exactly the same faces of characters it has never seen. For the look-alikes, every real-life photo
+is matched against all characters, with that photo itself left out.
+
+| | House guess on unseen characters: film stills | ... real-life photos | Look-alike: a real-life photo finds its character |
+|---|---|---|---|
+| Wiki pictures only | 27% | 25% | 87% |
+| + actor photos from Commons | 28% | 24% | 96% |
+
+The actor photos don't make the house guess better: it stays close to random guessing (25%).
+But they make the look-alikes much better for real photos, which is what players upload.
 
 ## The graphical game
 
@@ -227,7 +251,7 @@ of the face that really works: a photo of Tom Felton finds Draco. It's a game!
 pytest
 ```
 
-The tests take a few seconds and don't need a trained model. They check three things:
+The tests take a few seconds and don't need a trained model or the internet. They check:
 - The question bank is fair, and broken questions give a clear message.
 - Simulated students are sorted correctly and fairly: honest ones, random ones, ones who like
   nicer answers, and ones whose face points to the wrong house.
@@ -238,6 +262,9 @@ The tests take a few seconds and don't need a trained model. They check three th
   order.
 - The hat's voice makes slower, deeper, evenly loud lines, each only once. This uses a fake
   speech engine, so the 350 MB model isn't needed.
+- The picture sources, with made-up answers: only free licences and photos of just one person
+  are kept, no photo is downloaded twice, every credit survives a stopped run, and the Roboflow
+  import cuts out the right characters from a made-up dataset zip.
 
 ## Files
 
@@ -250,6 +277,7 @@ hat_brain.py     the hat's thinking: questions, scores, tournament, decision
 questions.json   the Sorting Hat's yes/no questions
 common.py        shared code: houses, paths, face cropping, the network
 scrape.py        step 1 – download character pictures
+import_roboflow.py  optional – add the Roboflow film stills
 prepare.py       step 2 – crop faces and clean out wrong ones
 train.py         step 3 – face fingerprints, look-alikes, the house network
 predict.py       step 4 – house from a photo only
@@ -260,5 +288,7 @@ models/          house network, face detector, face recognizer, voice model (not
 ```
 
 The pictures are © their owners (Warner Bros. and others). They are only used locally to train
-this toy model and to show look-alikes. `data/` and `models/` are in `.gitignore` so they are
+this toy model and to show look-alikes. The actor photos from Wikimedia Commons are under the free
+licences recorded in each folder's `sources.json`. The Roboflow dataset is listed under CC BY 4.0
+(credit: Leanse Sangeerth), but its stills are frames from the films. `data/` and `models/` are in `.gitignore` so they are
 never uploaded; please don't publish them.
