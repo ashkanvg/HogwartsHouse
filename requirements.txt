@@ -1,8 +1,12 @@
-torch>=2.2
-torchvision>=0.17
-opencv-python-headless>=4.8
-pillow>=10.0
-numpy>=1.26
-requests>=2.31
-pillow-heif>=0.16
-flask>=3.0
+# What the project needs. The upper limits stop a future major version from breaking things
+# (OpenCV 5 already removed the old face detector once). For the exact versions this was
+# tested with, use requirements-lock.txt instead.
+torch>=2.2,<3
+torchvision>=0.17,<1
+opencv-python-headless>=4.8,<6
+pillow>=10.0,<13
+pillow-heif>=0.16,<2
+numpy>=1.26,<3
+requests>=2.31,<3
+flask>=3.0,<4
+pytest>=8,<10  # only needed to run the tests

@@ -1,4 +1,5 @@
 """Shared pieces used by every script: houses, paths, face cropping, the neural network."""
+import hashlib
 import os
 import sys
 import urllib.request
@@ -23,8 +24,11 @@ FACES_DIR = ROOT / "data" / "faces"      # face crops made by prepare.py
 MODEL_PATH = ROOT / "models" / "sorting_hat.pt"
 QUESTIONS_PATH = ROOT / "questions.json"
 
-# YuNet: a tiny face-detection network from the official OpenCV model zoo (downloaded once, 230 KB)
-FACE_DETECTOR_URL = "https://github.com/opencv/opencv_zoo/raw/main/models/face_detection_yunet/face_detection_yunet_2023mar.onnx"
+# YuNet: a tiny face-detection network from the official OpenCV model zoo (downloaded once, 230 KB).
+# The link points at one fixed version, and the file must match its fingerprint (SHA-256) before we use it.
+FACE_DETECTOR_URL = ("https://github.com/opencv/opencv_zoo/raw/f12e12798e8314f7c074a6656816c048dcc95b7a"
+                     "/models/face_detection_yunet/face_detection_yunet_2023mar.onnx")
+FACE_DETECTOR_SHA256 = "8f2383e4dd3cfbb4553ea8718107fc0423210dc964f9f4280604804ed2552fa4"
 FACE_DETECTOR_PATH = ROOT / "models" / "face_detection_yunet_2023mar.onnx"
 
 IMG_SIZE = 224
@@ -42,17 +46,30 @@ def load_image(path):
 _face_detector = None
 
 
+def sha256(path):
+    return hashlib.sha256(Path(path).read_bytes()).hexdigest()
+
+
+def face_detector_file():
+    """The YuNet model file: downloaded once, and only used if its fingerprint is the expected one."""
+    if FACE_DETECTOR_PATH.exists() and sha256(FACE_DETECTOR_PATH) == FACE_DETECTOR_SHA256:
+        return FACE_DETECTOR_PATH
+    print("Downloading the face detector (once)...")
+    FACE_DETECTOR_PATH.parent.mkdir(parents=True, exist_ok=True)
+    partial = FACE_DETECTOR_PATH.with_suffix(".part")
+    urllib.request.urlretrieve(FACE_DETECTOR_URL, partial)
+    if sha256(partial) != FACE_DETECTOR_SHA256:
+        partial.unlink()
+        raise SystemExit("The downloaded face detector isn't the expected file, so it won't be used. Try again later.")
+    partial.replace(FACE_DETECTOR_PATH)
+    return FACE_DETECTOR_PATH
+
+
 def detect_faces(img):
     """Find faces with YuNet. Returns (x, y, w, h) boxes, biggest first."""
     global _face_detector
     if _face_detector is None:
-        if not FACE_DETECTOR_PATH.exists():
-            print("Downloading the face detector (once)...")
-            FACE_DETECTOR_PATH.parent.mkdir(parents=True, exist_ok=True)
-            partial = FACE_DETECTOR_PATH.with_suffix(".part")
-            urllib.request.urlretrieve(FACE_DETECTOR_URL, partial)
-            partial.rename(FACE_DETECTOR_PATH)
-        _face_detector = cv2.FaceDetectorYN.create(str(FACE_DETECTOR_PATH), "", (320, 320), 0.8, 0.3, 50)
+        _face_detector = cv2.FaceDetectorYN.create(str(face_detector_file()), "", (320, 320), 0.8, 0.3, 50)
 
     scale = min(1.0, 800 / max(img.size))  # big phone photos: detect on a smaller copy, it's faster
     small = img.resize((round(img.width * scale), round(img.height * scale))) if scale < 1 else img
