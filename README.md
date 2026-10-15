@@ -52,12 +52,16 @@ move it back to `data/faces/` and run `python prepare.py --no-clean`.
   Wikimedia limits how fast photos can be downloaded, so the scraper goes slowly. If it gets
   "too busy" answers, it pauses and leaves the rest for a later run, which tops up.
 - **Roboflow Universe** (optional): [Harry potter character detection](https://universe.roboflow.com/leanse-sangeerth-6o0b2/harry-potter-character-detection)
-  by Leanse Sangeerth, listed under CC BY 4.0: 675 film stills with a box around each of 13 main
-  characters (9 Gryffindors, 3 Slytherins, 1 Ravenclaw). Downloading it needs a free Roboflow
-  account: on that page click **Download Dataset**, choose **COCO JSON** and **Download zip to
-  computer**. Then `python import_roboflow.py <the zip>` cuts out every labelled character into
-  their folder (`roboflow_000.jpg`, ...), and `sources.json` records the still and the licence.
-  Run `python prepare.py` and `python train.py` again afterwards.
+  by Leanse Sangeerth, listed under CC BY 4.0: 675 pictures, mostly film stills and promo
+  pictures, with a box around each of 13 main characters (9 Gryffindors, 3 Slytherins, 1
+  Ravenclaw). Downloading it needs a free Roboflow account: on that page click **Download
+  Dataset**, choose **COCO JSON** and **Download zip to computer**. Then
+  `python import_roboflow.py <the zip>` cuts out every labelled character into their folder
+  (`roboflow_000.jpg`, ...), and `sources.json` records the still and the licence. Run
+  `python prepare.py` and `python train.py` again afterwards.
+  Roboflow squeezed every picture to 640×640 and added "mosaic" copies glued together from four
+  pictures. The importer skips the mosaics and keeps one copy of each picture: 605 cut-outs,
+  which gave 588 faces after cleaning.
 - **Other datasets I looked for:**
   - Kaggle and Hugging Face have no Harry Potter character picture sets, only text and tables.
   - The other Roboflow sets are smaller (237 stills) and show the same main characters.
@@ -65,18 +69,32 @@ move it back to `data/faces/` and run `python prepare.py --no-clean`.
 
 ### Did the extra pictures help?
 
-Tested with the same 5-group cross-validation as `train.py`, repeated with 10 different groupings.
-Each time the house network is trained with and without the extra pictures, and both are tested on
-exactly the same faces of characters it has never seen. For the look-alikes, every real-life photo
-is matched against all characters, with that photo itself left out.
+Faces per house after `python prepare.py` (with cleaning):
 
-| | House guess on unseen characters: film stills | ... real-life photos | Look-alike: a real-life photo finds its character |
-|---|---|---|---|
-| Wiki pictures only | 27% | 25% | 87% |
-| + actor photos from Commons | 28% | 24% | 96% |
+| Pictures | Gryffindor | Hufflepuff | Ravenclaw | Slytherin | All |
+|---|---|---|---|---|---|
+| Wiki only | 479 | 112 | 120 | 231 | 942 |
+| + Commons actor photos | 692 | 179 | 171 | 329 | 1,371 |
+| + Roboflow stills | 1,103 | 179 | 209 | 456 | 1,947 |
 
-The actor photos don't make the house guess better: it stays close to random guessing (25%).
-But they make the look-alikes much better for real photos, which is what players upload.
+Each source was tested with the same 5-group cross-validation as `train.py`, repeated with 10
+different groupings. Each time the house network is trained with and without the new pictures,
+and both are tested on exactly the same faces of characters it has never seen. For the
+look-alikes, every face is matched against all characters, with that face itself left out.
+
+| Adding... | House guess on unseen characters: film stills | ... real-life photos | Look-alike: a real-life photo finds its character | ... a film still |
+|---|---|---|---|---|
+| Commons actor photos (to the wiki pictures) | 27% → 28% | 25% → 24% | 87% → 96% | 86% → 85% |
+| Roboflow stills (to wiki + Commons) | 28% → 29% | 24% → 26% | 97% → 96% | 86% → 86% |
+
+Neither source makes the house guess better. The changes are within the normal variation between
+runs (about ±2 points), and the guess stays close to random guessing (25%). The actor photos make
+the look-alikes much better for real photos, which is what players upload. The Roboflow stills
+don't: for their 13 characters, a real photo finds the right character a little less often
+(98% → 96%) and a film still a little more often (93% → 95%). They also make Gryffindor even
+bigger. And cleaning with them moved out 12 older faces, 9 of them Dumbledore's: the stills
+mostly show the later films' Dumbledore, while his Commons photos show Richard Harris (the actor
+HP-API lists) decades earlier. So the Roboflow import stays optional, and the game doesn't need it.
 
 ## The graphical game
 
@@ -264,7 +282,7 @@ The tests take a few seconds and don't need a trained model or the internet. The
   speech engine, so the 350 MB model isn't needed.
 - The picture sources, with made-up answers: only free licences and photos of just one person
   are kept, no photo is downloaded twice, every credit survives a stopped run, and the Roboflow
-  import cuts out the right characters from a made-up dataset zip.
+  import skips mosaics and cuts out the right characters from a made-up dataset zip.
 
 ## Files
 

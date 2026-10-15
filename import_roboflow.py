@@ -1,9 +1,14 @@
 """Extra pictures (optional) - film stills from the Roboflow dataset "Harry potter character detection".
 
 The dataset (https://universe.roboflow.com/leanse-sangeerth-6o0b2/harry-potter-character-detection,
-by Leanse Sangeerth, licence CC BY 4.0) has 675 film stills with a labelled box around each of 13 main
-characters. Downloading it needs a free Roboflow account: on that page, click "Download Dataset",
-choose the format "COCO JSON" and "Download zip to computer".
+by Leanse Sangeerth, licence CC BY 4.0) has 675 pictures, mostly film stills, with a labelled box around
+each of 13 main characters. Downloading it needs a free Roboflow account: on that page, click
+"Download Dataset", choose the format "COCO JSON" and "Download zip to computer".
+
+Roboflow squeezed every still to 640x640 and made 3 copies of each training still: the still itself
+(slightly changed) and two "mosaics" glued together from pieces of four stills. Mosaics give cut-off
+faces and copies of other stills, so only the single stills are used (see single_stills()).
+The README says how much these stills help (in short: not with the house guess).
 
 Every labelled box is cut out with some room around it (so prepare.py still finds the whole face) and
 saved in the character's folder as data/raw/<House>/<Character>/roboflow_000.jpg, ... A box is only
@@ -19,10 +24,11 @@ import argparse
 import io
 import json
 import zipfile
-from collections import Counter
+from collections import Counter, defaultdict
 from pathlib import Path
 
-from PIL import Image
+import numpy as np
+from PIL import Image, ImageFilter
 
 from common import HOUSES, RAW_DIR, detect_faces
 from scrape import character_folder, plain_name
@@ -31,6 +37,7 @@ DATASET_URL = "https://universe.roboflow.com/leanse-sangeerth-6o0b2/harry-potter
 CREDIT = {"author": "Leanse Sangeerth (Roboflow Universe)", "licence": "CC BY 4.0"}
 MARGIN = 0.5   # room added on every side of a box, as a fraction of its size
 MIN_BOX = 48   # boxes smaller than this (in pixels) are too small for a usable face
+SEAM = 0.3     # single stills have weaker seams than this, mosaics stronger ones (see seam_score())
 
 
 def read_coco(archive):
@@ -49,8 +56,39 @@ def read_coco(archive):
 
 def original_still(file_name):
     """Roboflow renames 'frame12.jpg' to 'frame12_jpg.rf.<code>.jpg', with a new code for every
-    changed copy it makes (flipped, brighter, ...). This gives back the still's own name."""
+    copy it makes. This gives back the still's own name."""
     return Path(file_name).name.split(".rf.")[0]
+
+
+def seam_score(img):
+    """How much a picture looks glued together from four pieces, like Roboflow's mosaics: the share
+    of the picture's width where the brightness jumps along its strongest straight line across, or
+    of its height along the strongest line from top to bottom, whichever is smaller.
+    Single stills mostly score below 0.2, mosaics 0.3 to 0.9."""
+    gray = np.asarray(img.convert("L").filter(ImageFilter.MedianFilter(3)), np.float32)  # no salt-and-pepper noise
+    across = (np.abs(np.diff(gray, axis=0)) > 24).mean(1)[4:-4]  # every row (but the edges): how much of it jumps
+    down = (np.abs(np.diff(gray, axis=1)) > 24).mean(0)[4:-4]    # every column, the same
+    return float(min(across.max(), down.max()))
+
+
+def single_stills(archive, files):
+    """The files that are single stills, not mosaics.
+
+    Copies of a still share its name. So for every name we keep the copy with the weakest seams -
+    or a few copies, as different stills can share a name like 'image.jpg'.
+    """
+    by_name = defaultdict(list)
+    for file in files:
+        by_name[(Path(file).parent, original_still(file))].append(file)
+    copies = {}  # how many copies Roboflow made of every still, per part: 3 in train/, 1 in valid/ and test/
+    for part in {part for part, _ in by_name}:
+        copies[part] = Counter(len(group) for (p, _), group in by_name.items() if p == part).most_common(1)[0][0]
+    singles = set()
+    for (part, _), group in by_name.items():
+        scored = sorted((seam_score(Image.open(io.BytesIO(archive.read(file)))), file) for file in group)
+        stills = max(1, round(len(group) / copies[part]))
+        singles.update(file for score, file in scored[:stills] if score < SEAM)
+    return singles
 
 
 def match_characters(labels, characters):
@@ -89,10 +127,11 @@ def import_stills(zip_path, characters):
         if unknown := sorted({label for _, label, _ in boxes} - set(cast)):
             print("Labels that aren't a character with a house (skipped):", ", ".join(unknown))
 
-        by_character = {}  # character name -> {still: (file, box)}: one picture per still, also for changed copies
+        singles = single_stills(archive, sorted({file for file, _, _ in boxes}))
+        by_character = {}  # character name -> {still: box}
         for file, label, box in boxes:
-            if label in cast and min(box[2], box[3]) >= MIN_BOX:
-                by_character.setdefault(cast[label]["name"], {}).setdefault(original_still(file), (file, box))
+            if file in singles and label in cast and min(box[2], box[3]) >= MIN_BOX:
+                by_character.setdefault(cast[label]["name"], {}).setdefault(file, box)
 
         for character in characters:
             folder = character_folder(character)
@@ -100,10 +139,10 @@ def import_stills(zip_path, characters):
             sources = json.loads(sources_file.read_text()) if sources_file.exists() else {}
             done = {s.get("still") for s in sources.values() if isinstance(s, dict)}  # imported before
             number = 0
-            for still, (file, box) in sorted(by_character.get(character["name"], {}).items()):
+            for still, box in sorted(by_character.get(character["name"], {}).items()):
                 if still in done:
                     continue
-                img = Image.open(io.BytesIO(archive.read(file))).convert("RGB")
+                img = Image.open(io.BytesIO(archive.read(still))).convert("RGB")
                 cutout, box_in_cutout = crop_box(img, box)
                 if not face_is_inside(cutout, box_in_cutout):
                     continue
